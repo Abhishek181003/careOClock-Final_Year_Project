@@ -91,7 +91,11 @@ class DayVitalAggregation:
 
         # Fallback to any unslotted readings on that calendar day
         if self.readings:
-            all_vals = [getattr(r, vital_key) for r in self.readings if getattr(r, vital_key, None) is not None]
+            all_vals = [
+                getattr(r, vital_key)
+                for r in self.readings
+                if getattr(r, vital_key, None) is not None
+            ]
             if all_vals:
                 if len(all_vals) > 1:
                     return float(np.mean(all_vals)), float(np.ptp(all_vals))
@@ -293,7 +297,10 @@ def build_today_vector(
     missing_mask = np.array([v is None for v in raw_vals], dtype=bool)
 
     means = np.array(
-        [baseline_stats[v]["mean"] if raw_vals[i] is None else float(raw_vals[i]) for i, v in enumerate(active_vitals)],
+        [
+            baseline_stats[v]["mean"] if raw_vals[i] is None else float(raw_vals[i])
+            for i, v in enumerate(active_vitals)
+        ],
         dtype=float,
     )
     vars_ = np.zeros(n_vitals, dtype=float)
@@ -339,16 +346,8 @@ def compute_personalized_anomaly(
     patient_id = request.patient_id
 
     # Resolve effective hyperparameters (Finding 4 & Phase 2 Optimization)
-    effective_contamination = (
-        contamination
-        if contamination is not None
-        else CONTAMINATION
-    )
-    effective_n_estimators = (
-        n_estimators
-        if n_estimators is not None
-        else DEFAULT_N_ESTIMATORS
-    )
+    effective_contamination = contamination if contamination is not None else CONTAMINATION
+    effective_n_estimators = n_estimators if n_estimators is not None else DEFAULT_N_ESTIMATORS
 
     # Determine reference date for "today" (Finding 2)
     if request.current_date:
@@ -363,8 +362,7 @@ def compute_personalized_anomaly(
 
     # 2. Identify active features clearing the 7-day cold-start gate (A-5)
     active_features = [
-        v for v in TRACKED_VITALS
-        if days_of_history.get(v, 0) >= MIN_DAYS_TO_ACTIVATE
+        v for v in TRACKED_VITALS if days_of_history.get(v, 0) >= MIN_DAYS_TO_ACTIVATE
     ]
 
     total_calendar_days = len(day_aggregations)

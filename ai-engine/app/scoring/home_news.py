@@ -316,9 +316,9 @@ def generate_plain_language_reason(
     if red_flag_components and any(e.startswith("symptom_") for e in escalators):
         rf_key = red_flag_components[0]
         sym_escalators = [
-            CLINICAL_SYMPTOMS[e.replace("symptom_", "")].get(
-                "short_label", CLINICAL_SYMPTOMS[e.replace("symptom_", "")]["label"]
-            ).lower()
+            CLINICAL_SYMPTOMS[e.replace("symptom_", "")]
+            .get("short_label", CLINICAL_SYMPTOMS[e.replace("symptom_", "")]["label"])
+            .lower()
             for e in escalators
             if e.startswith("symptom_")
         ]

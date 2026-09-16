@@ -14,7 +14,9 @@ from app.scoring.personalized_anomaly import compute_personalized_anomaly
 router = APIRouter(
     prefix="/score",
     tags=["Clinical Decision Support (Layers 1 & 2)"],
-    dependencies=[Depends(verify_internal_key)],  # A-1: Mandatory service-to-service key check on all scoring endpoints
+    dependencies=[
+        Depends(verify_internal_key)
+    ],  # A-1: Mandatory service-to-service key check on all scoring endpoints
 )
 
 

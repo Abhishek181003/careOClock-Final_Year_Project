@@ -147,7 +147,11 @@ class VitalsReading(BaseModel):
             )
 
         # 4. Clinician-gated defense-in-depth for SpO2 Scale 2 (Finding 6 & Gap 1)
-        if self.spo2_scale == 2 and self.requesting_role is not None and self.requesting_role != "doctor":
+        if (
+            self.spo2_scale == 2
+            and self.requesting_role is not None
+            and self.requesting_role != "doctor"
+        ):
             raise ValueError(
                 "SpO2 Scale 2 (hypercapnic respiratory failure / COPD target) is restricted to clinician (doctor) requests."
             )
@@ -272,7 +276,9 @@ class HistoricalVitalsReading(BaseModel):
             self.respiration_rate,
         ]
         if all(v is None for v in vitals):
-            raise ValueError("Historical reading must contain at least one valid vital sign parameter.")
+            raise ValueError(
+                "Historical reading must contain at least one valid vital sign parameter."
+            )
 
         if self.systolic_bp is not None and self.diastolic_bp is not None:
             pulse_pressure = self.systolic_bp - self.diastolic_bp
@@ -343,7 +349,9 @@ class FeatureDeviation(BaseModel):
     baseline_mean: float = Field(description="Patient's rolling baseline mean")
     baseline_std: float = Field(description="Patient's rolling baseline standard deviation")
     z_score: float = Field(description="Standardized deviation: (value - mean) / std")
-    direction: Literal["higher", "lower", "normal"] = Field(description="Direction of deviation relative to normal")
+    direction: Literal["higher", "lower", "normal"] = Field(
+        description="Direction of deviation relative to normal"
+    )
 
 
 class EvaluationMetadata(BaseModel):
@@ -382,15 +390,11 @@ class EvaluationMetadata(BaseModel):
 class PersonalizedAnomalyResult(BaseModel):
     """Output payload of the Layer 2 Personalized Anomaly Detection engine."""
 
-    patient_id: str = Field(
-        description="Pseudonymized opaque patient identifier"
-    )
+    patient_id: str = Field(description="Pseudonymized opaque patient identifier")
     status: Literal["active", "not yet available"] = Field(
         description="Status of Layer 2 anomaly detection ('not yet available' during cold start < 7 days)"
     )
-    message: str = Field(
-        description="Human-readable status rationale or guidance"
-    )
+    message: str = Field(description="Human-readable status rationale or guidance")
     days_of_history: Dict[str, int] = Field(
         default_factory=dict,
         description="Per-vital count of calendar days recorded in patient's history (A-5)",
