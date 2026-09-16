@@ -1,0 +1,14 @@
+{
+  "name": "careoclock-root",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node start-all.js",
+    "start": "node start-all.js",
+    "seed": "npm --prefix server run seed",
+    "test:ai": "cd ai-engine && python -m pytest",
+    "test:server": "npm --prefix server test",
+    "build:client": "npm --prefix client run build"
+  }
+}

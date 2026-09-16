@@ -1,0 +1,69 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS variable mirror of the Tailwind tokens, for inline SVGs / non-Tailwind contexts. */
+:root {
+  --color-paper: #F6F7F5;
+  --color-surface: #FFFFFF;
+  --color-ink: #1F2E2C;
+  --color-ink-soft: #4B5A57;
+  --color-line: #DCE4E1;
+  --color-brand: #1D6F64;
+  --color-brand-dark: #154F47;
+  --color-brand-light: #BFE3D3;
+  --color-dawn: #E8A24D;
+  --color-dusk: #5B5A8C;
+  --color-tier-stable: #1D6F64;
+  --color-tier-moderate: #B8863A;
+  --color-tier-high: #C56A3F;
+  --color-tier-critical: #A6423B;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-paper text-ink font-body text-body antialiased;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display text-ink;
+}
+
+/* Visible keyboard focus everywhere — never remove this without a replacement. */
+:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect reduced-motion preferences app-wide. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip-to-content link, hidden until focused. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--color-brand);
+  color: white;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0 0 8px 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
