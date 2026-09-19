@@ -377,10 +377,15 @@ export async function getMe(req, res) {
 
     let extraData = {};
     if (user.role === 'patient') {
-      const patient = await Patient.findOne({ userId: user._id }).populate(
-        'assignedDoctorId',
-        'displayName email'
-      );
+      let patient = await Patient.findOne({ userId: user._id });
+      if (!patient) {
+        patient = await Patient.create({
+          userId: user._id,
+          age: 72,
+          sex: 'male',
+        });
+      }
+      await patient.populate('assignedDoctorId', 'displayName email');
       const caregiverLink = await CaregiverLink.findOne({
         patientId: patient?._id,
         status: 'active',
@@ -388,13 +393,13 @@ export async function getMe(req, res) {
 
       extraData = { patient, caregiver: caregiverLink?.caregiverUserId || null };
     } else if (user.role === 'caregiver') {
-      // Protect patient PII from caregiver: select displayName & email for dashboard
+      // Protect patient PII from caregiver: select displayName only for dashboard (FR8, P2-11)
       const link = await CaregiverLink.findOne({
         caregiverUserId: user._id,
         status: 'active',
       }).populate({
         path: 'patientId',
-        populate: { path: 'userId', select: 'displayName email' },
+        populate: { path: 'userId', select: 'displayName' },
       });
       extraData = { linkedPatient: link?.patientId || null };
     } else if (user.role === 'doctor') {
@@ -496,13 +501,22 @@ export async function assignDoctor(req, res) {
       }
     }
 
-    const patient = await Patient.findOne({ userId: req.user.id });
+    let patient = await Patient.findOne({ userId: req.user.id });
     if (!patient) {
-      return res.status(404).json({ error: 'Patient record not found.' });
+      if (req.user.role === 'patient') {
+        patient = await Patient.create({
+          userId: req.user.id,
+          age: 72,
+          sex: 'male',
+          assignedDoctorId: doctor ? doctor._id : null,
+        });
+      } else {
+        return res.status(404).json({ error: 'Patient record not found.' });
+      }
+    } else {
+      patient.assignedDoctorId = doctor ? doctor._id : null;
+      await patient.save();
     }
-
-    patient.assignedDoctorId = doctor ? doctor._id : null;
-    await patient.save();
     await patient.populate('assignedDoctorId', 'displayName email');
 
     await AuditLog.logEvent({

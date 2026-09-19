@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertTriangle, AlertOctagon, PhoneCall } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, AlertOctagon, PhoneCall, Clock } from 'lucide-react';
 
 const TIERS = {
   stable: { label: 'Stable', color: 'bg-tier-stable', Icon: CheckCircle2 },
@@ -7,6 +7,7 @@ const TIERS = {
   medium: { label: 'Moderate', color: 'bg-tier-moderate', Icon: AlertTriangle },
   high: { label: 'High', color: 'bg-tier-high', Icon: AlertOctagon },
   critical: { label: 'Critical', color: 'bg-tier-critical', Icon: PhoneCall },
+  pending: { label: 'Pending Check-In', color: 'bg-slate-500', Icon: Clock },
 };
 
 // Severity is coded three ways at once (color + icon + word) on purpose —

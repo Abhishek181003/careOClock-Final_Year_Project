@@ -109,7 +109,8 @@ export const PHYSIOLOGICAL_THRESHOLDS = {
 
   // Vitals Source Types
   // NFR4 ensures 'manual' is always functional with zero hardware dependencies.
-  sources: ['manual', 'oauth'],
+  // 'wearable' is the canonical automated telemetry source; 'oauth' supported for backward-compatibility.
+  sources: ['manual', 'wearable', 'oauth'],
 
   // Standard Clinical Symptoms (CLAUDE.md §5 H-7)
   // Chest pain and confusion act as independent clinical escalators.

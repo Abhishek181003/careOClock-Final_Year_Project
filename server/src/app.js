@@ -9,6 +9,8 @@ import dataRightsRoutes from './routes/dataRightsRoutes.js';
 import caregiverRoutes from './routes/caregiverRoutes.js';
 import medicineRoutes from './routes/medicineRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import appointmentRoutes from './routes/appointmentRoutes.js';
+import wearableRoutes from './routes/wearableRoutes.js';
 import { authLimiter, clinicalLimiter, apiLimiter } from './middleware/rateLimiter.js';
 
 import sanitizeInput from './middleware/sanitize.js';
@@ -102,14 +104,18 @@ app.use('/api/auth/register', authLimiter);
 app.use('/api/clinical', clinicalLimiter);
 app.use('/api/medicines', clinicalLimiter);
 app.use('/api/reports', clinicalLimiter);
+app.use('/api/appointments', clinicalLimiter);
+app.use('/api/wearables', clinicalLimiter);
 
 // ── API Routes ──────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/clinical', clinicalRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/appointments', appointmentRoutes);
 app.use('/api/data-requests', dataRightsRoutes);
 app.use('/api/caregiver', caregiverRoutes);
+app.use('/api/wearables', wearableRoutes);
 
 // Health check endpoint
 app.get('/health', (_req, res) => {

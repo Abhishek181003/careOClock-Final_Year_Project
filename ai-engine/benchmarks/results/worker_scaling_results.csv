@@ -1,0 +1,11 @@
+concurrency,history_days,wall_time_sec,throughput_rps,lat_min_ms,lat_p50_ms,lat_p90_ms,lat_p95_ms,lat_p99_ms,lat_max_ms,error_rate,nfr2_sla_met,workers,topology
+50,28,7.157,7.0,5631.0,6196.8,7051.1,7094.0,7112.0,7119.6,0.0,False,1,"In-Process (ASGITransport, GIL-Bound)"
+100,28,15.065,6.6,12286.2,13325.0,14803.5,14945.0,14996.2,14997.1,0.0,False,1,"In-Process (ASGITransport, GIL-Bound)"
+50,28,3.796,13.2,625.1,3724.2,3777.9,3786.0,3791.0,3791.1,0.0,False,2,Uvicorn Process Pool (W=2)
+100,28,6.334,15.8,938.1,6161.8,6260.4,6268.7,6281.0,6284.6,0.0,False,2,Uvicorn Process Pool (W=2)
+50,28,2.763,18.1,489.8,2171.6,2736.3,2745.7,2750.2,2750.7,0.0,False,4,Uvicorn Process Pool (W=4)
+100,28,5.055,19.8,808.0,3865.5,4939.5,4955.7,4966.7,4977.7,0.0,False,4,Uvicorn Process Pool (W=4)
+50,28,5.32,9.4,849.6,5246.0,5294.1,5295.7,5308.9,5318.4,0.0,False,8,Uvicorn Process Pool (W=8)
+100,28,3.779,26.5,305.2,2589.0,3727.4,3741.9,3766.3,3771.2,0.0,False,8,Uvicorn Process Pool (W=8)
+50,28,6.898,7.2,1074.1,6637.0,6832.9,6841.6,6856.5,6857.0,0.0,False,12,Uvicorn Process Pool (W=12)
+100,28,3.877,25.8,781.9,3073.9,3789.4,3811.7,3839.9,3851.0,0.0,False,12,Uvicorn Process Pool (W=12)

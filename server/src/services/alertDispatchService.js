@@ -13,6 +13,26 @@ export async function dispatchAlert({ prediction, patient, vitals, user = null }
     return null;
   }
 
+  // Demo / Sandbox Alert Isolation (Phase 11 Finding 5)
+  // Suppress real external alert dispatch for simulated/demo readings to prevent false clinical alarms
+  if (vitals?.isDemoReading) {
+    console.log(
+      `[ALERT-DISPATCH-DEMO] Alert dispatch suppressed for demo/simulation reading (vitalsId: ${vitals._id}, tier: ${tier}).`
+    );
+    await AuditLog.logEvent({
+      action: 'DEMO_ALERT_SIMULATED',
+      userId: user?._id || user?.id || vitals.enteredBy,
+      role: user?.role || 'system',
+      details: {
+        patientId: patient?._id,
+        tier,
+        vitalsId: vitals._id,
+        reason: 'Demo mode simulated vitals reading (external dispatch suppressed)',
+      },
+    });
+    return null;
+  }
+
   const doctorId = patient?.assignedDoctorId;
   if (!doctorId) {
     console.warn(`[ALERT-DISPATCH] Cannot dispatch alert: No assigned doctor for patient ${patient?._id}`);

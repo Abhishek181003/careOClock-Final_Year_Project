@@ -12,7 +12,10 @@ import CaregiverHome from './pages/caregiver/CaregiverHome';
 import DoctorTriage from './pages/doctor/DoctorTriage';
 import MedicinePage from './pages/patient/MedicinePage';
 import ReportsPage from './pages/patient/ReportsPage';
+import HealthPage from './pages/patient/HealthPage';
+import AppointmentPage from './pages/patient/AppointmentPage';
 import ProfilePage from './pages/profile/ProfilePage';
+import WearablesPage from './pages/patient/WearablesPage';
 import ComingSoon from './pages/ComingSoon';
 
 const HOME_BY_ROLE = {
@@ -57,9 +60,19 @@ export default function App() {
                 <Route path="/app/doctor" element={<DoctorTriage />} />
               </Route>
 
+              {/* Health Telemetry & AI Analytics */}
+              <Route element={<RoleRoute allow={['patient', 'caregiver']} />}>
+                <Route path="/app/health" element={<HealthPage />} />
+              </Route>
+
               {/* Medication Management (Phase 7) */}
               <Route element={<RoleRoute allow={['patient', 'doctor']} />}>
                 <Route path="/app/medicine" element={<MedicinePage />} />
+              </Route>
+
+              {/* Clinical Appointments */}
+              <Route element={<RoleRoute allow={['patient', 'doctor', 'caregiver']} />}>
+                <Route path="/app/appointments" element={<AppointmentPage />} />
               </Route>
 
               {/* Medical Reports & Records (Phase 8) */}
@@ -70,11 +83,10 @@ export default function App() {
               {/* User Profile & Care Circle */}
               <Route path="/app/profile" element={<ProfilePage />} />
 
-              {/* Wearable Sync Extension Hook (Phase 11) */}
-              <Route
-                path="/app/wearable"
-                element={<ComingSoon phaseLabel="Phase 11" feature="Wearable OAuth Sync" />}
-              />
+              {/* Wearable Multi-Provider Sync (Phase 11) */}
+              <Route element={<RoleRoute allow={['patient', 'doctor', 'caregiver']} />}>
+                <Route path="/app/wearable" element={<WearablesPage />} />
+              </Route>
             </Route>
           </Route>
 

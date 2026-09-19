@@ -68,6 +68,4 @@ open_holes_resolution.md
 Frontend_Design_Templates/
 ai-files-detail.md
 doc/
-server/tests/
-ai-engine/tests/
-ai-engine/benchmarks/
+

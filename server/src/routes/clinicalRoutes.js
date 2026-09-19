@@ -124,6 +124,8 @@ const vitalsSchema = z
     spo2Scale: z.number().int().min(1).max(2).optional().default(1),
     onSupplementalOxygen: z.boolean().optional().default(false),
     adherenceRate7d: z.number().min(0).max(1).optional().nullable(),
+    isDemoReading: z.boolean().optional().default(false),
+    vitalMetadata: z.record(z.any()).optional().default({}),
   })
   .refine(
     (data) => data.systolicBp - data.diastolicBp >= PHYSIOLOGICAL_THRESHOLDS.pulsePressure.minDiff,
@@ -205,6 +207,8 @@ router.post('/vitals', requireRole(['patient', 'doctor']), async (req, res) => {
       spo2Scale: validatedData.spo2Scale,
       onSupplementalOxygen: validatedData.onSupplementalOxygen,
       adherenceRate7d: validatedData.adherenceRate7d,
+      isDemoReading: validatedData.isDemoReading,
+      vitalMetadata: validatedData.vitalMetadata,
     });
 
     await AuditLog.logEvent({
@@ -543,6 +547,89 @@ router.get('/prescriptions', requireRole(['patient', 'doctor', 'caregiver']), as
       viewerRole: req.user.role,
       patientId: targetPatientId,
       prescriptions,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * GET /api/clinical/patients
+ * List all patients assigned to the authenticated doctor, with their latest assessment.
+ * Permitted role: 'doctor'.
+ */
+router.get('/patients', requireRole(['doctor']), async (req, res) => {
+  try {
+    const assignedPatients = await Patient.find({ assignedDoctorId: req.user.id })
+      .populate('userId', 'displayName email');
+
+    const patientList = await Promise.all(
+      assignedPatients.map(async (p) => {
+        const latestPred = await Prediction.findOne({ patientId: p._id })
+          .sort({ recordedAt: -1 });
+
+        const filteredPred = latestPred ? filterDoctorView(latestPred) : null;
+        const rawTier = filteredPred?.overallTier?.toLowerCase();
+        const tier = rawTier ? (rawTier === 'low' ? 'stable' : rawTier) : 'pending';
+        const keyDev =
+          latestPred?.doctorExplanation?.summary ||
+          latestPred?.patientExplanation ||
+          'No check-ins recorded yet';
+
+        let assessment = null;
+        if (filteredPred) {
+          const points = [];
+          const cp = latestPred?.layer1?.componentPoints || {};
+          const paramLabels = {
+            respiration_rate: 'Respiration Rate',
+            spo2: 'Oxygen Saturation (SpO2)',
+            systolic_bp: 'Systolic Blood Pressure',
+            heart_rate: 'Heart Rate',
+            temperature_c: 'Body Temperature',
+          };
+          for (const [param, pts] of Object.entries(cp)) {
+            if (pts > 0) {
+              points.push({ label: paramLabels[param] || param, points: pts });
+            }
+          }
+
+          const deviations = latestPred?.doctorExplanation?.baselineDeviations || [];
+
+          assessment = {
+            ...filteredPred,
+            plainLanguageSummary: keyDev,
+            layer1: {
+              ...(filteredPred.layer1 || {}),
+              points,
+            },
+            layer2: {
+              ...(filteredPred.layer2 || {}),
+              deviations,
+            },
+          };
+        }
+
+        return {
+          id: p._id.toString(),
+          name: p.userId?.displayName || 'Unnamed Patient',
+          email: p.userId?.email || '',
+          age: p.age || 70,
+          sex: p.sex ? p.sex.charAt(0).toUpperCase() + p.sex.slice(1) : 'Not specified',
+          tier,
+          riskScore: filteredPred?.overallScore || 0,
+          lastCheckInAt: latestPred?.recordedAt
+            ? new Date(latestPred.recordedAt).toLocaleString()
+            : 'No check-ins yet',
+          keyDeviation: keyDev,
+          assessment,
+        };
+      })
+    );
+
+    return res.status(200).json({
+      message: 'Assigned patients retrieved successfully',
+      count: patientList.length,
+      patients: patientList,
     });
   } catch (error) {
     return res.status(500).json({ error: 'Internal server error', message: error.message });

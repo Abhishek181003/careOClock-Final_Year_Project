@@ -7,16 +7,22 @@ import { CONFIG } from '../../config';
 const LINKS_BY_ROLE = {
   patient: [
     { to: '/app/patient', label: 'Today' },
+    { to: '/app/health', label: 'Health' },
+    { to: '/app/wearable', label: 'Wearables' },
     { to: '/app/medicine', label: 'Medicine' },
+    { to: '/app/appointments', label: 'Appointments' },
     { to: '/app/reports', label: 'Reports' },
     { to: '/app/profile', label: 'Profile' },
   ],
   caregiver: [
     { to: '/app/caregiver', label: 'Overview' },
+    { to: '/app/health', label: 'Health' },
+    { to: '/app/appointments', label: 'Appointments' },
     { to: '/app/profile', label: 'Profile' },
   ],
   doctor: [
     { to: '/app/doctor', label: 'Triage' },
+    { to: '/app/appointments', label: 'Appointments' },
     { to: '/app/reports', label: 'Reports' },
     { to: '/app/profile', label: 'Profile' },
   ],

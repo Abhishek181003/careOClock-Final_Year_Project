@@ -32,7 +32,7 @@ const vitalsSchema = new mongoose.Schema(
       type: String,
       enum: {
         values: PHYSIOLOGICAL_THRESHOLDS.sources,
-        message: 'Source must be "manual" or "oauth"',
+        message: 'Source must be "manual", "wearable", or "oauth"',
       },
       default: 'manual',
     },
@@ -141,6 +141,15 @@ const vitalsSchema = new mongoose.Schema(
       type: Number,
       min: [0.0, 'Adherence rate cannot be negative'],
       max: [1.0, 'Adherence rate cannot exceed 1.0 (100%)'],
+    },
+    isDemoReading: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    vitalMetadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
   },
   {

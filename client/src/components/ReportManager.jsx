@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FileText,
   UploadCloud,
@@ -14,6 +14,9 @@ import {
   ShieldCheck,
   Calendar,
   User,
+  FolderOpen,
+  Activity,
+  FileCheck2,
 } from 'lucide-react';
 import './ReportManager.css';
 
@@ -21,12 +24,21 @@ const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
+const CATEGORIES = [
+  { id: 'all', label: 'All Documents', icon: FolderOpen },
+  { id: 'lab_report', label: 'Lab Reports', icon: Activity, color: 'teal' },
+  { id: 'prescription', label: 'Prescriptions', icon: FileCheck2, color: 'emerald' },
+  { id: 'discharge_summary', label: 'Discharge Summaries', icon: FileText, color: 'amber' },
+  { id: 'imaging', label: 'Imaging & Scans', icon: ImageIcon, color: 'purple' },
+  { id: 'other', label: 'Other Records', icon: FileText, color: 'slate' },
+];
+
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 Bytes';
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function formatDate(dateString) {
@@ -36,13 +48,14 @@ function formatDate(dateString) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   });
 }
 
-export default function ReportManager({ token: propToken, patientId, userRole }) {
-  const token = propToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('careoclock_token') : '');
+export default function ReportManager({ token: propToken, patientId, userRole = 'patient' }) {
+  const token =
+    propToken ||
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('careoclock_token') : '');
+
   const [reports, setReports] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -50,9 +63,9 @@ export default function ReportManager({ token: propToken, patientId, userRole })
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
+  const [activeCategory, setActiveCategory] = useState('all');
 
-  // Upload Modal / Form State
+  // Upload Modal State
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -86,7 +99,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
       if (res.ok) {
         setReports(data.reports || []);
       } else {
-        setError(data.error || 'Failed to retrieve medical reports.');
+        setError(data.error || 'Failed to retrieve medical records.');
       }
     } catch (err) {
       setError(`Network error: ${err.message}`);
@@ -99,7 +112,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     loadReports();
   }, [loadReports]);
 
-  // Clean preview blob URL when closing or unmounting
+  // Clean preview blob URL on unmount or close
   useEffect(() => {
     return () => {
       if (previewBlobUrl) {
@@ -108,17 +121,16 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     };
   }, [previewBlobUrl]);
 
-  // Handle File Validation & Selection
+  // Validate and select file
   const validateAndSetFile = (file) => {
     if (!file) return;
 
-    // Check extension
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     const isExtAllowed = ALLOWED_EXTENSIONS.includes(ext);
     const isMimeAllowed = ALLOWED_MIME_TYPES.includes(file.type);
 
     if (!isExtAllowed && !isMimeAllowed) {
-      setError('Invalid file type. Only PDF (.pdf), JPEG (.jpg, .jpeg), and PNG (.png) files are accepted.');
+      setError('Invalid file format. Please upload PDF (.pdf), JPEG (.jpg, .jpeg), or PNG (.png) files.');
       return;
     }
 
@@ -130,7 +142,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     setError('');
     setSelectedFile(file);
 
-    // Auto-fill title from filename if title is blank
+    // Auto-fill title if blank
     if (!uploadForm.title) {
       const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
       setUploadForm((prev) => ({ ...prev, title: baseName }));
@@ -160,7 +172,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
-      setError('Please select a PDF or image file to upload.');
+      setError('Please select a valid document file to upload.');
       return;
     }
 
@@ -190,7 +202,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
       const data = await res.json();
 
       if (res.ok) {
-        setSuccessNotice(`Medical document "${data.report?.title}" uploaded and secured successfully.`);
+        setSuccessNotice(`Document "${data.report?.title}" uploaded and secured successfully.`);
         setSelectedFile(null);
         setUploadForm({ title: '', reportType: 'lab_report', description: '' });
         setShowUploadModal(false);
@@ -206,7 +218,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     }
   };
 
-  // Inline View
+  // Inline View Handler
   const handleView = async (report) => {
     setPreviewReport(report);
     setIsPreviewLoading(true);
@@ -224,14 +236,14 @@ export default function ReportManager({ token: propToken, patientId, userRole })
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to retrieve document stream.');
+        throw new Error(errData.error || 'Failed to load document stream.');
       }
 
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       setPreviewBlobUrl(objectUrl);
     } catch (err) {
-      setError(`Viewing failed: ${err.message}`);
+      setError(`Unable to open preview: ${err.message}`);
       setPreviewReport(null);
     } finally {
       setIsPreviewLoading(false);
@@ -246,7 +258,7 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     setPreviewReport(null);
   };
 
-  // Authenticated Download
+  // Authenticated Download Handler
   const handleDownload = async (report) => {
     try {
       setError('');
@@ -273,9 +285,9 @@ export default function ReportManager({ token: propToken, patientId, userRole })
     }
   };
 
-  // Soft Delete
+  // Soft Delete Handler
   const handleDelete = async (report) => {
-    if (!window.confirm(`Are you sure you want to remove report "${report.title}"?`)) {
+    if (!window.confirm(`Are you sure you want to remove "${report.title}" from your medical records?`)) {
       return;
     }
 
@@ -289,11 +301,11 @@ export default function ReportManager({ token: propToken, patientId, userRole })
       const data = await res.json();
 
       if (res.ok) {
-        setSuccessNotice('Report removed successfully.');
+        setSuccessNotice('Document removed successfully.');
         setReports((prev) => prev.filter((r) => r.id !== report.id));
         setTimeout(() => setSuccessNotice(''), 3000);
       } else {
-        setError(data.error || 'Failed to remove report.');
+        setError(data.error || 'Failed to remove document.');
       }
     } catch (err) {
       setError(`Delete error: ${err.message}`);
@@ -301,329 +313,312 @@ export default function ReportManager({ token: propToken, patientId, userRole })
   };
 
   // Filtered reports
-  const filteredReports = reports.filter((r) => {
-    const matchesType = filterType === 'all' || r.reportType === filterType;
-    const matchesSearch =
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.originalFilename.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesType && matchesSearch;
-  });
+  const filteredReports = useMemo(() => {
+    return reports.filter((r) => {
+      const matchesCategory = activeCategory === 'all' || r.reportType === activeCategory;
+      const matchesSearch =
+        r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.originalFilename.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (r.description && r.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesCategory && matchesSearch;
+    });
+  }, [reports, activeCategory, searchQuery]);
 
-  const pdfCount = reports.filter((r) => r.mimeType === 'application/pdf').length;
-  const imgCount = reports.length - pdfCount;
+  // Document statistics
+  const stats = useMemo(() => {
+    const totalBytes = reports.reduce((acc, r) => acc + (r.fileSizeBytes || 0), 0);
+    const labsCount = reports.filter((r) => r.reportType === 'lab_report').length;
+    const rxCount = reports.filter((r) => r.reportType === 'prescription').length;
+    const imgCount = reports.filter((r) => r.reportType === 'imaging').length;
+    return {
+      total: reports.length,
+      totalBytesFormatted: formatBytes(totalBytes),
+      labsCount,
+      rxCount,
+      imgCount,
+    };
+  }, [reports]);
 
   return (
-    <div className="report-manager-container">
-      {/* Header & Stats Banner */}
-      <div className="report-header-card">
-        <div>
-          <div className="report-header-title">
-            <FileText size={22} color="#06b6d4" />
-            <span>Reports & Records Management (FR7)</span>
-          </div>
-          <div className="report-header-subtitle">
-            Secure multi-role storage for prescriptions, lab panels, and diagnostic imaging ({reports.length} total • {pdfCount} PDFs • {imgCount} Images).
+    <div className="w-full space-y-6 text-ink">
+      {/* ── Header & Storage Summary Banner ──────────────────────────── */}
+      <div className="p-5 rounded-ritual bg-surface border border-line shadow-ritual flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-full bg-brand-light flex items-center justify-center text-brand">
+              <FileText size={20} />
+            </div>
+            <div>
+              <h2 className="text-h2 font-display text-ink">Medical Records & Documents</h2>
+              <p className="text-xs text-ink-soft">
+                Encrypted multi-role repository for clinical lab panels, verified prescriptions, and diagnostic imaging.
+              </p>
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <span className="report-security-badge">
-            <ShieldCheck size={14} /> Path-Traversal Guarded • RBAC
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold">
+            <ShieldCheck size={14} className="text-emerald-600" />
+            <span>Encrypted • HIPAA Guarded</span>
           </span>
+
           <button
+            type="button"
             onClick={loadReports}
-            title="Refresh reports list"
-            style={{
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
-              padding: '0.45rem',
-              color: '#94a3b8',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-            }}
+            title="Refresh documents list"
+            className="p-2 rounded-full border border-line bg-paper hover:bg-surface text-ink-soft hover:text-ink transition-all"
           >
-            <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
+            <RefreshCw size={15} className={isLoading ? 'spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* Alert Notices */}
+      {/* ── Quick Stats Grid ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3.5 rounded-ritual bg-surface border border-line shadow-ritual space-y-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">
+            Total Records
+          </span>
+          <div className="text-2xl font-display font-bold text-ink">{stats.total}</div>
+          <span className="text-[11px] text-ink-soft block">{stats.totalBytesFormatted} stored</span>
+        </div>
+
+        <div className="p-3.5 rounded-ritual bg-surface border border-line shadow-ritual space-y-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
+            Lab Panels
+          </span>
+          <div className="text-2xl font-display font-bold text-ink">{stats.labsCount}</div>
+          <span className="text-[11px] text-ink-soft block">Blood & Pathology</span>
+        </div>
+
+        <div className="p-3.5 rounded-ritual bg-surface border border-line shadow-ritual space-y-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+            Prescriptions
+          </span>
+          <div className="text-2xl font-display font-bold text-ink">{stats.rxCount}</div>
+          <span className="text-[11px] text-ink-soft block">Active & Historical</span>
+        </div>
+
+        <div className="p-3.5 rounded-ritual bg-surface border border-line shadow-ritual space-y-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
+            Diagnostic Scans
+          </span>
+          <div className="text-2xl font-display font-bold text-ink">{stats.imgCount}</div>
+          <span className="text-[11px] text-ink-soft block">X-Ray, MRI, CT</span>
+        </div>
+      </div>
+
+      {/* ── Notification & Alert Banners ──────────────────────────────── */}
       {error && (
-        <div className="report-alert report-alert-error">
-          <AlertCircle size={16} style={{ flexShrink: 0 }} />
-          <span>{error}</span>
-          <button
-            onClick={() => setError('')}
-            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
-          >
+        <div className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between gap-3 animate-pop-report">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="text-rose-600 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError('')} className="text-rose-600 hover:text-rose-900">
             <X size={14} />
           </button>
         </div>
       )}
 
       {successNotice && (
-        <div className="report-alert report-alert-success">
-          <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-          <span>{successNotice}</span>
+        <div className="p-3.5 rounded-ritual bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-3 animate-pop-report">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" />
+            <span className="font-medium">{successNotice}</span>
+          </div>
+          <button onClick={() => setSuccessNotice('')} className="text-emerald-600 hover:text-emerald-900">
+            <X size={14} />
+          </button>
         </div>
       )}
 
-      {/* Action Toolbar */}
-      <div className="report-toolbar">
-        <div className="report-search-filter">
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search
-              size={14}
-              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }}
-            />
-            <input
-              type="text"
-              className="report-search-input"
-              style={{ paddingLeft: '2rem', width: '100%' }}
-              placeholder="Search by title or filename..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          <select
-            className="report-type-select"
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          >
-            <option value="all">All Documents ({reports.length})</option>
-            <option value="prescription">Prescriptions</option>
-            <option value="lab_report">Lab Reports</option>
-            <option value="discharge_summary">Discharge Summaries</option>
-            <option value="imaging">Imaging & Scans</option>
-            <option value="other">Other</option>
-          </select>
+      {/* ── Toolbar: Search, Filters & Upload Trigger ─────────────────── */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 flex-wrap">
+        {/* Search Input */}
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft" />
+          <input
+            type="text"
+            placeholder="Search records by title, filename, or notes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-full border border-line bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+          />
         </div>
 
+        {/* Upload Document Button */}
         <button
-          className="btn-upload-trigger"
+          type="button"
           onClick={() => {
             setShowUploadModal(true);
             setError('');
           }}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-brand hover:bg-brand-dark text-white text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-95"
         >
-          <UploadCloud size={16} /> Upload New Document
+          <UploadCloud size={16} />
+          <span>Upload Document</span>
         </button>
       </div>
 
-      {/* Upload Modal / Form */}
-      {showUploadModal && (
-        <div className="upload-card">
-          <div className="upload-card-header">
-            <div className="upload-card-title">
-              <UploadCloud size={18} color="#06b6d4" />
-              <span>Upload Medical Document</span>
-            </div>
+      {/* Category Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1" role="tablist">
+        {CATEGORIES.map(({ id, label, icon: CatIcon }) => {
+          const isSelected = activeCategory === id;
+          const count =
+            id === 'all'
+              ? reports.length
+              : reports.filter((r) => r.reportType === id).length;
+
+          return (
             <button
-              className="btn-close-card"
-              onClick={() => {
-                setShowUploadModal(false);
-                setSelectedFile(null);
-              }}
+              key={id}
+              type="button"
+              onClick={() => setActiveCategory(id)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                isSelected
+                  ? 'bg-brand text-white shadow-sm'
+                  : 'bg-paper text-ink-soft hover:bg-surface border border-line'
+              }`}
             >
-              <X size={18} />
+              <CatIcon size={14} />
+              <span>{label}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  isSelected ? 'bg-white/25 text-white' : 'bg-surface text-ink-soft border border-line'
+                }`}
+              >
+                {count}
+              </span>
             </button>
-          </div>
+          );
+        })}
+      </div>
 
-          <form onSubmit={handleUploadSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {/* Drag & Drop Area */}
-            {!selectedFile ? (
-              <div
-                className={`dropzone ${dragActive ? 'drag-active' : ''}`}
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="file-input-hidden"
-                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                  onChange={(e) => e.target.files?.[0] && validateAndSetFile(e.target.files[0])}
-                />
-                <UploadCloud size={36} className="dropzone-icon" />
-                <div className="dropzone-prompt">Choose a file or drag & drop here</div>
-                <div className="dropzone-subtext">Supports PDF, JPEG, PNG up to 10MB</div>
-              </div>
-            ) : (
-              <div className="selected-file-banner">
-                <div className="selected-file-info">
-                  {selectedFile.type === 'application/pdf' ? (
-                    <FileText size={22} color="#ef4444" />
-                  ) : (
-                    <ImageIcon size={22} color="#8b5cf6" />
-                  )}
-                  <div>
-                    <div className="selected-file-name">{selectedFile.name}</div>
-                    <div className="selected-file-size">{formatBytes(selectedFile.size)}</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn-close-card"
-                  onClick={() => setSelectedFile(null)}
-                  title="Change file"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-
-            {/* Title & Category Fields */}
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Document Title *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. CBC Blood Panel March 2026"
-                  required
-                  value={uploadForm.title}
-                  onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Document Category</label>
-                <select
-                  className="form-select"
-                  value={uploadForm.reportType}
-                  onChange={(e) => setUploadForm({ ...uploadForm, reportType: e.target.value })}
-                >
-                  <option value="prescription">Prescription</option>
-                  <option value="lab_report">Lab Report</option>
-                  <option value="discharge_summary">Discharge Summary</option>
-                  <option value="imaging">Diagnostic Imaging (X-Ray / MRI / CT)</option>
-                  <option value="other">Other Medical Record</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Notes & Clinical Context (Optional)</label>
-              <textarea
-                className="form-textarea"
-                rows={2}
-                placeholder="Key findings, ordering physician, or relevant symptoms..."
-                value={uploadForm.description}
-                onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
-              />
-            </div>
-
-            <div className="upload-actions">
-              <button
-                type="button"
-                className="btn-cancel"
-                onClick={() => {
-                  setShowUploadModal(false);
-                  setSelectedFile(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn-submit-upload" disabled={isUploading || !selectedFile}>
-                {isUploading ? (
-                  <>
-                    <RefreshCw size={14} className="spin" /> Securing & Uploading...
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud size={14} /> Upload Document
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Reports Grid / Empty State */}
+      {/* ── Document Cards Grid ───────────────────────────────────────── */}
       {filteredReports.length === 0 ? (
-        <div className="empty-reports-card">
-          <FileText size={38} className="empty-reports-icon" />
-          <h4 style={{ color: '#e2e8f0', marginBottom: '0.4rem' }}>No medical documents found</h4>
-          <p style={{ fontSize: '0.82rem', margin: 0 }}>
-            {searchQuery || filterType !== 'all'
-              ? 'Try changing your search keywords or filter category.'
-              : 'Upload laboratory reports, prescriptions, or imaging scans to keep records organized.'}
-          </p>
+        <div className="p-10 rounded-ritual bg-surface border border-line shadow-ritual text-center space-y-3">
+          <div className="w-14 h-14 mx-auto rounded-full bg-brand-light/50 flex items-center justify-center text-brand">
+            <FileText size={28} />
+          </div>
+          <div>
+            <h4 className="text-base font-display font-bold text-ink">No Medical Documents Found</h4>
+            <p className="text-xs text-ink-soft max-w-md mx-auto mt-1">
+              {searchQuery || activeCategory !== 'all'
+                ? 'No documents match your filter keywords. Try resetting your search or selecting "All Documents".'
+                : 'Upload medical prescriptions, laboratory test results, and imaging scans to keep records organized and accessible to your clinical team.'}
+            </p>
+          </div>
+          {(searchQuery || activeCategory !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setActiveCategory('all');
+              }}
+              className="text-xs font-semibold text-brand hover:underline"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       ) : (
-        <div className="reports-grid">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredReports.map((report) => {
             const isPdf = report.mimeType === 'application/pdf';
-            const badgeClass = `report-type-badge badge-${report.reportType || 'other'}`;
+
+            // Category style helper
+            const catConfig = {
+              lab_report: { label: 'Lab Report', color: 'bg-teal-50 text-teal-800 border-teal-200' },
+              prescription: { label: 'Prescription', color: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+              discharge_summary: { label: 'Discharge', color: 'bg-amber-50 text-amber-800 border-amber-200' },
+              imaging: { label: 'Imaging', color: 'bg-purple-50 text-purple-800 border-purple-200' },
+              other: { label: 'Record', color: 'bg-slate-100 text-slate-800 border-slate-200' },
+            }[report.reportType] || { label: 'Document', color: 'bg-slate-100 text-slate-800 border-slate-200' };
 
             return (
-              <div key={report.id} className="report-card">
-                <div>
-                  <div className="report-card-top">
-                    <div className={`report-icon-wrapper ${isPdf ? 'report-icon-pdf' : 'report-icon-img'}`}>
-                      {isPdf ? <FileText size={22} /> : <ImageIcon size={22} />}
+              <div
+                key={report.id}
+                className="p-5 rounded-ritual bg-surface border border-line shadow-ritual hover:shadow-md transition-all flex flex-col justify-between space-y-4 animate-pop-report"
+              >
+                <div className="space-y-3">
+                  {/* Card Header: Icon + Title + Category Pill */}
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        isPdf ? 'bg-rose-100 text-rose-600' : 'bg-purple-100 text-purple-600'
+                      }`}
+                    >
+                      {isPdf ? <FileText size={20} /> : <ImageIcon size={20} />}
                     </div>
 
-                    <div className="report-card-meta">
-                      <div className="report-title-row">
-                        <span className="report-card-title" title={report.title}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-sm font-display font-bold text-ink truncate" title={report.title}>
                           {report.title}
+                        </h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${catConfig.color}`}>
+                          {catConfig.label}
                         </span>
-                        <span className={badgeClass}>{report.reportType.replace('_', ' ')}</span>
                       </div>
-                      <div className="report-orig-name" title={report.originalFilename}>
+
+                      <div className="text-[11px] text-ink-soft truncate mt-0.5" title={report.originalFilename}>
                         {report.originalFilename} • {formatBytes(report.fileSizeBytes)}
                       </div>
                     </div>
                   </div>
 
+                  {/* Description / Notes */}
                   {report.description && (
-                    <div className="report-description" style={{ marginTop: '0.65rem' }}>
+                    <p className="text-xs text-ink-soft line-clamp-2 leading-relaxed bg-paper p-2.5 rounded-clinical border border-line">
                       {report.description}
-                    </div>
+                    </p>
                   )}
                 </div>
 
-                <div>
-                  <div className="report-footer-meta">
-                    <span className="uploader-tag">
-                      <User size={12} /> Uploaded by {report.uploaderRole}
+                {/* Footer Metadata & Actions */}
+                <div className="pt-3 border-t border-line space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-ink-soft">
+                    <span className="flex items-center gap-1 truncate">
+                      <User size={12} className="flex-shrink-0" />
+                      <span>{report.uploaderRole === 'doctor' ? 'Clinician Upload' : 'Patient Upload'}</span>
                     </span>
-                    <span>
-                      <Calendar size={11} style={{ marginRight: '3px', verticalAlign: 'text-top' }} />
-                      {formatDate(report.createdAt)}
+                    <span className="flex items-center gap-1 flex-shrink-0">
+                      <Calendar size={12} />
+                      <span>{formatDate(report.createdAt)}</span>
                     </span>
                   </div>
 
-                  <div className="report-actions" style={{ marginTop: '0.65rem' }}>
+                  {/* Actions Toolbar */}
+                  <div className="flex items-center gap-2">
                     <button
-                      className="btn-action btn-action-view"
+                      type="button"
                       onClick={() => handleView(report)}
-                      title="View inline"
+                      className="flex-1 py-1.5 px-3 rounded-full bg-brand-light hover:bg-brand text-brand hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95"
                     >
-                      <Eye size={13} /> View
+                      <Eye size={13} />
+                      <span>View</span>
                     </button>
+
                     <button
-                      className="btn-action btn-action-download"
+                      type="button"
                       onClick={() => handleDownload(report)}
+                      className="py-1.5 px-3 rounded-full bg-paper hover:bg-surface text-ink-soft hover:text-ink border border-line font-semibold text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95"
                       title="Download file"
                     >
-                      <Download size={13} /> Download
+                      <Download size={13} />
+                      <span>Download</span>
                     </button>
+
                     {(userRole === 'patient' || userRole === 'doctor') && (
                       <button
-                        className="btn-action btn-action-delete"
+                        type="button"
                         onClick={() => handleDelete(report)}
-                        title="Remove report"
+                        className="p-1.5 rounded-full hover:bg-rose-50 text-ink-soft hover:text-rose-600 border border-transparent hover:border-rose-200 transition-all active:scale-95"
+                        title="Remove document"
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={14} />
                       </button>
                     )}
                   </div>
@@ -634,29 +629,243 @@ export default function ReportManager({ token: propToken, patientId, userRole })
         </div>
       )}
 
-      {/* Inline Preview Modal */}
-      {previewReport && (
-        <div className="preview-modal-overlay" onClick={handleClosePreview}>
-          <div className="preview-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="preview-modal-header">
-              <div className="preview-modal-title-group">
-                {previewReport.mimeType === 'application/pdf' ? (
-                  <FileText size={20} color="#ef4444" />
-                ) : (
-                  <ImageIcon size={20} color="#8b5cf6" />
-                )}
-                <span className="preview-modal-title">{previewReport.title}</span>
+      {/* ── Modal: Drag-and-Drop Document Upload ───────────────────────── */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-pop-report">
+          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-surface rounded-ritual shadow-ritual border border-line p-6 relative space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center text-brand">
+                  <UploadCloud size={18} />
+                </div>
+                <div>
+                  <h3 className="text-h3 font-display text-ink">Upload Medical Document</h3>
+                  <p className="text-xs text-ink-soft">
+                    Securely upload laboratory panels, physician prescriptions, or imaging scans.
+                  </p>
+                </div>
               </div>
-              <button className="btn-close-card" onClick={handleClosePreview}>
+              <button
+                onClick={() => {
+                  setShowUploadModal(false);
+                  setSelectedFile(null);
+                }}
+                className="p-1.5 rounded-full hover:bg-paper text-ink-soft hover:text-ink transition-colors"
+              >
                 <X size={20} />
               </button>
             </div>
 
-            <div className="preview-modal-body">
+            {/* Modal Form */}
+            <form onSubmit={handleUploadSubmit} className="space-y-4">
+              {/* Drag & Drop Dropzone */}
+              {!selectedFile ? (
+                <div
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`p-6 rounded-ritual border-2 border-dashed cursor-pointer transition-all text-center space-y-2 ${
+                    dragActive
+                      ? 'border-brand bg-brand-light/30 ring-2 ring-brand/20'
+                      : 'border-line bg-paper hover:bg-surface hover:border-brand/50'
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="file-input-hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    onChange={(e) => e.target.files?.[0] && validateAndSetFile(e.target.files[0])}
+                  />
+                  <div className="w-12 h-12 mx-auto rounded-full bg-brand-light flex items-center justify-center text-brand">
+                    <UploadCloud size={24} />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-ink block">
+                      Click to browse or drag and drop files here
+                    </span>
+                    <span className="text-[11px] text-ink-soft block mt-0.5">
+                      Supports PDF, JPEG, and PNG formats (up to 10 MB)
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* Selected File Preview Banner */
+                <div className="p-3.5 rounded-ritual bg-brand-light/40 border border-brand/20 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-brand flex-shrink-0 shadow-sm">
+                      {selectedFile.type === 'application/pdf' ? (
+                        <FileText size={18} className="text-rose-600" />
+                      ) : (
+                        <ImageIcon size={18} className="text-purple-600" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-ink truncate">{selectedFile.name}</div>
+                      <div className="text-[11px] text-ink-soft">{formatBytes(selectedFile.size)}</div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFile(null)}
+                    className="p-1.5 rounded-full hover:bg-white text-ink-soft hover:text-ink transition-colors"
+                    title="Choose different file"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+
+              {/* Document Title & Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-ink-soft">
+                    Document Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CBC Blood Panel March 2026"
+                    value={uploadForm.title}
+                    onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-clinical border border-line bg-paper text-ink text-xs focus:outline-none focus:ring-2 focus:ring-brand font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-ink-soft">
+                    Document Category *
+                  </label>
+                  <select
+                    value={uploadForm.reportType}
+                    onChange={(e) => setUploadForm({ ...uploadForm, reportType: e.target.value })}
+                    className="w-full px-3 py-2 rounded-clinical border border-line bg-paper text-ink text-xs focus:outline-none focus:ring-2 focus:ring-brand font-medium"
+                  >
+                    <option value="lab_report">Lab Report (Blood / Pathology)</option>
+                    <option value="prescription">Prescription / Medication List</option>
+                    <option value="discharge_summary">Discharge Summary / Clinic Note</option>
+                    <option value="imaging">Diagnostic Imaging (X-Ray / MRI / CT)</option>
+                    <option value="other">Other Medical Record</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notes & Clinical Context */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-ink-soft">
+                  Notes & Clinical Findings (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Fasting glucose normal, cholesterol slightly elevated. Ordered by Dr. Reed."
+                  value={uploadForm.description}
+                  onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-clinical border border-line bg-paper text-ink text-xs focus:outline-none focus:ring-2 focus:ring-brand font-medium"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-3 border-t border-line flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    setSelectedFile(null);
+                  }}
+                  className="px-4 py-2 rounded-full border border-line bg-paper hover:bg-surface text-ink-soft hover:text-ink text-xs font-semibold transition-all"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isUploading || !selectedFile}
+                  className="px-5 py-2 rounded-full bg-brand hover:bg-brand-dark text-white text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isUploading ? (
+                    <>
+                      <RefreshCw size={14} className="spin" />
+                      <span>Encrypting & Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud size={14} />
+                      <span>Upload Document</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: High-Res Inline Document Viewer ─────────────────────── */}
+      {previewReport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-pop-report"
+          onClick={handleClosePreview}
+        >
+          <div
+            className="w-full max-w-4xl max-h-[92vh] flex flex-col bg-surface rounded-ritual shadow-2xl border border-line overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Viewer Header */}
+            <div className="p-4 border-b border-line flex items-center justify-between gap-4 bg-surface">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    previewReport.mimeType === 'application/pdf'
+                      ? 'bg-rose-100 text-rose-600'
+                      : 'bg-purple-100 text-purple-600'
+                  }`}
+                >
+                  {previewReport.mimeType === 'application/pdf' ? (
+                    <FileText size={18} />
+                  ) : (
+                    <ImageIcon size={18} />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-display font-bold text-ink truncate">
+                    {previewReport.title}
+                  </h3>
+                  <p className="text-[11px] text-ink-soft truncate">
+                    {previewReport.originalFilename} • {formatBytes(previewReport.fileSizeBytes)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownload(previewReport)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-paper hover:bg-surface border border-line text-ink-soft hover:text-ink text-xs font-semibold transition-all active:scale-95"
+                >
+                  <Download size={13} />
+                  <span>Download</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClosePreview}
+                  className="p-1.5 rounded-full hover:bg-paper text-ink-soft hover:text-ink transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Viewer Body */}
+            <div className="flex-1 p-4 bg-paper/50 overflow-auto flex items-center justify-center min-h-[400px]">
               {isPreviewLoading ? (
-                <div className="preview-loading">
-                  <RefreshCw size={28} className="spin" color="#06b6d4" />
-                  <span>Decrypting and loading document stream...</span>
+                <div className="flex flex-col items-center gap-3 text-ink-soft py-12">
+                  <RefreshCw size={28} className="spin text-brand" />
+                  <span className="text-xs font-medium">Decrypting and streaming document...</span>
                 </div>
               ) : previewBlobUrl ? (
                 previewReport.mimeType === 'application/pdf' ? (
@@ -666,31 +875,20 @@ export default function ReportManager({ token: propToken, patientId, userRole })
                     className="preview-iframe"
                   />
                 ) : (
-                  <img
-                    src={previewBlobUrl}
-                    alt={previewReport.title}
-                    className="preview-image"
-                  />
+                  <div className="preview-image-container">
+                    <img
+                      src={previewBlobUrl}
+                      alt={previewReport.title}
+                      className="preview-image"
+                    />
+                  </div>
                 )
               ) : (
-                <div className="preview-loading">
-                  <AlertCircle size={28} color="#f87171" />
-                  <span>Unable to preview document content.</span>
+                <div className="flex flex-col items-center gap-2 text-rose-700 py-12">
+                  <AlertCircle size={28} />
+                  <span className="text-xs font-medium">Unable to load document stream.</span>
                 </div>
               )}
-            </div>
-
-            <div className="preview-modal-footer">
-              <span className="preview-modal-meta">
-                {previewReport.originalFilename} ({formatBytes(previewReport.fileSizeBytes)}) •{' '}
-                {previewReport.mimeType}
-              </span>
-              <button
-                className="btn-action btn-action-download"
-                onClick={() => handleDownload(previewReport)}
-              >
-                <Download size={14} /> Download File
-              </button>
             </div>
           </div>
         </div>

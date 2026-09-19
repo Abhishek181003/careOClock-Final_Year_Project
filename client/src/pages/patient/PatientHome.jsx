@@ -15,7 +15,7 @@ export default function PatientHome() {
   });
   const [activeSlot, setActiveSlot] = useState(null);
   const [latestAssessment, setLatestAssessment] = useState(null);
-  const [streakDays, setStreakDays] = useState(7);
+  const [streakDays, setStreakDays] = useState(0);
   const [patientId, setPatientId] = useState('');
 
   const loadPatientData = useCallback(async () => {
@@ -88,7 +88,7 @@ export default function PatientHome() {
         <div>
           <p className="text-ink-soft text-sm font-medium">Daily Health Ritual</p>
           <h1 className="text-h1 font-display text-ink mt-0.5">
-            Good day, {user?.displayName ? user.displayName.split(' ')[0] : 'Arthur'}
+            Good day, {user?.displayName ? user.displayName.split(' ')[0] : (user?.email ? user.email.split('@')[0] : 'there')}
           </h1>
         </div>
 
@@ -136,6 +136,8 @@ export default function PatientHome() {
           </div>
 
           <VitalsEntryForm
+            initialSlot={activeSlot}
+            hideHeader={true}
             patientId={patientId}
             userRole="patient"
             onVitalsSaved={handleVitalsSaved}
@@ -155,9 +157,10 @@ export default function PatientHome() {
             role="patient"
             assessment={
               latestAssessment || {
-                overallTier: 'stable',
+                overallTier: 'pending',
+                overallScore: 0,
                 plainLanguageSummary:
-                  'All recorded vital signs are within your normal, steady baseline range.',
+                  'No health check-ins recorded yet today. Complete your morning or evening check-in above to calculate your personalized clinical risk assessment.',
               }
             }
           />

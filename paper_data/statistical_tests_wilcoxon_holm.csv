@@ -1,0 +1,9 @@
+cohort,comparison,w_statistic,raw_p_value,rank_biserial_effect,holm_adjusted_p_value,significant_at_05,source_file
+24_personas,Hybrid vs Layer 1,0.0,1.862645149230957e-09,1.0,0.0,True,ai-engine/benchmarks/results/benchmark_manifest.json
+24_personas,Hybrid vs Layer 2 IF,168.0,0.19092952087521553,0.2,0.19093,False,ai-engine/benchmarks/results/benchmark_manifest.json
+24_personas,Hybrid vs Naive z-score,71.0,0.0005054883658885956,-0.533,0.001011,True,ai-engine/benchmarks/results/benchmark_manifest.json
+24_personas,Hybrid vs LOF,34.0,6.917864084243774e-06,0.8,2.1e-05,True,ai-engine/benchmarks/results/benchmark_manifest.json
+5_personas_baseline,Hybrid vs Layer 1,0.0,1.862645149230957e-09,1.0,0.0,True,ai-engine/benchmarks/results/benchmark_manifest_5personas_baseline.json
+5_personas_baseline,Hybrid vs Layer 2 IF,84.0,0.0015832837671041489,-0.4,0.003167,True,ai-engine/benchmarks/results/benchmark_manifest_5personas_baseline.json
+5_personas_baseline,Hybrid vs Naive z-score,21.0,8.326023817062378e-07,-0.733,2e-06,True,ai-engine/benchmarks/results/benchmark_manifest_5personas_baseline.json
+5_personas_baseline,Hybrid vs LOF,107.0,0.008705463260412216,-0.4,0.008705,True,ai-engine/benchmarks/results/benchmark_manifest_5personas_baseline.json

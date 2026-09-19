@@ -52,6 +52,19 @@ async function seed() {
       console.log('✓ Created Patient: patient@careoclock.com (Password: Patient123!)');
     } else {
       console.log('Patient already exists: patient@careoclock.com');
+      let patientRecord = await Patient.findOne({ userId: patientUser._id });
+      if (!patientRecord) {
+        await Patient.create({
+          userId: patientUser._id,
+          assignedDoctorId: doctor._id,
+          age: 72,
+          sex: 'male',
+          heightCm: 175,
+          weightKg: 78,
+          existingConditions: ['Hypertension', 'Type 2 Diabetes'],
+        });
+        console.log('✓ Created missing Patient record for patient@careoclock.com');
+      }
     }
 
     // 3. Caregiver

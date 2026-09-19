@@ -188,7 +188,7 @@ router.get('/:id', requireRole(['patient', 'caregiver', 'doctor']), async (req, 
  * PUT /api/medicines/:id
  * Update medicine details or replenish stock
  */
-router.put('/:id', requireRole(['patient', 'caregiver', 'doctor']), async (req, res) => {
+const handleUpdateMedicine = async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -238,7 +238,10 @@ router.put('/:id', requireRole(['patient', 'caregiver', 'doctor']), async (req, 
     }
     return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
-});
+};
+
+router.put('/:id', requireRole(['patient', 'caregiver', 'doctor']), handleUpdateMedicine);
+router.patch('/:id', requireRole(['patient', 'caregiver', 'doctor']), handleUpdateMedicine);
 
 /**
  * DELETE /api/medicines/:id

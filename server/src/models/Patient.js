@@ -65,6 +65,52 @@ const patientSchema = new mongoose.Schema(
       grantedAt: { type: Date },
       withdrawnAt: { type: Date },
     },
+    connectedProviders: [
+      {
+        provider: {
+          type: String,
+          enum: ['oura', 'withings', 'google_health'],
+          required: [true, 'Wearable provider identifier is required'],
+        },
+        providerUserId: {
+          type: String,
+          default: null,
+        },
+        accessToken: {
+          type: String,
+          required: [true, 'Encrypted access token is required'],
+        },
+        refreshToken: {
+          type: String,
+          default: null,
+        },
+        tokenExpiresAt: {
+          type: Date,
+          default: null,
+        },
+        scope: {
+          type: String,
+          default: null,
+        },
+        connectedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        lastSyncAt: {
+          type: Date,
+          default: null,
+        },
+        isDemoMode: {
+          type: Boolean,
+          default: false,
+        },
+        deviceInfo: {
+          model: { type: String, default: null },
+          deviceType: { type: String, default: null },
+          batteryLevel: { type: Number, default: null },
+        },
+      },
+    ],
     retentionPolicyAckAt: {
       type: Date,
       default: Date.now,

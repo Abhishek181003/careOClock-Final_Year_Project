@@ -1,152 +1,38 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Search, Stethoscope, X, Pill, FileText, Activity } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState, useCallback } from 'react';
+import { Search, Stethoscope, X, Pill, FileText, Activity, RefreshCw, Users } from 'lucide-react';
 import { api } from '../../api/client';
 import RiskBadge from '../../components/RiskBadge';
 import AssessmentCard from '../../components/AssessmentCard';
 import MedicineManager from '../../components/MedicineManager';
 import ReportManager from '../../components/ReportManager';
 
-const TIER_RANK = { critical: 0, high: 1, moderate: 2, medium: 2, stable: 3, low: 3 };
-
-const DEMO_PATIENTS = [
-  {
-    id: 'demo-p-1',
-    name: 'Arthur Pendelton',
-    age: 74,
-    sex: 'Male',
-    tier: 'moderate',
-    riskScore: 62,
-    lastCheckInAt: 'Today, 8:30 AM',
-    keyDeviation: 'HR +18 bpm vs personal baseline; mild dyspnea reported',
-    assessment: {
-      overallTier: 'moderate',
-      overallScore: 62,
-      plainLanguageSummary:
-        'Resting heart rate is 18 bpm higher than usual baseline. Reported mild shortness of breath.',
-      layer1: {
-        news2Subtotal: 4,
-        points: [
-          { label: 'Heart Rate (98 bpm)', points: 1 },
-          { label: 'Respiration Rate (21 bpm)', points: 2 },
-          { label: 'SpO2 (94%)', points: 1 },
-        ],
-      },
-      layer2: {
-        deviations: [
-          { feature: 'Heart Rate', current: '98 bpm', baselineMean: '74', baselineSD: '4.2', zScore: 5.7, trend: 'Rising' },
-          { feature: 'Systolic BP', current: '142 mmHg', baselineMean: '128', baselineSD: '6.1', zScore: 2.3, trend: 'Stable' },
-          { feature: 'SpO2', current: '94%', baselineMean: '97.5%', baselineSD: '0.8', zScore: -4.4, trend: 'Falling' },
-        ],
-      },
-    },
-  },
-  {
-    id: 'demo-p-2',
-    name: 'Eleanor Vance',
-    age: 81,
-    sex: 'Female',
-    tier: 'critical',
-    riskScore: 88,
-    lastCheckInAt: 'Today, 9:15 AM',
-    keyDeviation: 'Severe hypoxia (SpO2 89%) and tachycardia (115 bpm)',
-    assessment: {
-      overallTier: 'critical',
-      overallScore: 88,
-      plainLanguageSummary:
-        'SpO2 is critically low at 89% with high heart rate and chest tightness reported. Immediate doctor evaluation advised.',
-      layer1: {
-        news2Subtotal: 8,
-        points: [
-          { label: 'Heart Rate (115 bpm)', points: 2 },
-          { label: 'SpO2 (89% Scale 1)', points: 3 },
-          { label: 'Systolic BP (168 mmHg)', points: 2 },
-          { label: 'Temperature (38.3 °C)', points: 1 },
-        ],
-      },
-      layer2: {
-        deviations: [
-          { feature: 'SpO2', current: '89%', baselineMean: '96.2%', baselineSD: '0.9', zScore: -8.0, trend: 'Critically Low' },
-          { feature: 'Heart Rate', current: '115 bpm', baselineMean: '78', baselineSD: '5.1', zScore: 7.2, trend: 'Spike' },
-        ],
-      },
-    },
-  },
-  {
-    id: 'demo-p-3',
-    name: 'George Henderson',
-    age: 68,
-    sex: 'Male',
-    tier: 'stable',
-    riskScore: 18,
-    lastCheckInAt: 'Today, 7:45 AM',
-    keyDeviation: 'Normal steady state across all physiological parameters',
-    assessment: {
-      overallTier: 'stable',
-      overallScore: 18,
-      plainLanguageSummary:
-        'All vital signs remain inside normal expected bounds with consistent daily compliance.',
-      layer1: { news2Subtotal: 0, points: [] },
-      layer2: {
-        deviations: [
-          { feature: 'Heart Rate', current: '72 bpm', baselineMean: '71', baselineSD: '3.8', zScore: 0.2, trend: 'Steady' },
-        ],
-      },
-    },
-  },
-  {
-    id: 'demo-p-4',
-    name: 'Martha Stewart',
-    age: 77,
-    sex: 'Female',
-    tier: 'high',
-    riskScore: 74,
-    lastCheckInAt: 'Today, 8:05 AM',
-    keyDeviation: 'Fever (37.8°C) accompanied by persistent cough and tachypnea',
-    assessment: {
-      overallTier: 'high',
-      overallScore: 74,
-      plainLanguageSummary:
-        'Fever with declining SpO2 indicating potential lower respiratory infection. Requires close observation.',
-      layer1: {
-        news2Subtotal: 6,
-        points: [
-          { label: 'Heart Rate (104 bpm)', points: 1 },
-          { label: 'SpO2 (92%)', points: 2 },
-          { label: 'Temperature (37.8 °C)', points: 1 },
-          { label: 'Respiration Rate (22 bpm)', points: 2 },
-        ],
-      },
-      layer2: {
-        deviations: [
-          { feature: 'Temperature', current: '37.8 °C', baselineMean: '36.5', baselineSD: '0.3', zScore: 4.3, trend: 'Rising' },
-          { feature: 'SpO2', current: '92%', baselineMean: '97.0%', baselineSD: '0.8', zScore: -6.2, trend: 'Falling' },
-        ],
-      },
-    },
-  },
-];
+const TIER_RANK = { critical: 0, high: 1, moderate: 2, medium: 2, stable: 3, low: 3, pending: 4 };
 
 export default function DoctorTriage() {
-  const [patients, setPatients] = useState(DEMO_PATIENTS);
+  const [patients, setPatients] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [tierFilter, setTierFilter] = useState('all');
   const [expandedId, setExpandedId] = useState(null);
   const [activeModal, setActiveModal] = useState(null); // { type: 'medicines' | 'reports', patient: object }
 
-  // Attempt to load assigned patient alerts from backend
-  useEffect(() => {
-    api
-      .get('/clinical/alerts')
-      .then((res) => {
-        if (res.data?.alerts && res.data.alerts.length > 0) {
-          setPatients((prev) => {
-            const hasNewAlerts = res.data.alerts.some((a) => a.status === 'active');
-            return hasNewAlerts ? [...prev] : prev;
-          });
-        }
-      })
-      .catch(() => {});
+  // Load real assigned patients from backend with zero dummy fallbacks
+  const loadPatients = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.get('/clinical/patients');
+      setPatients(res.data?.patients || []);
+    } catch (err) {
+      console.error('Failed to load doctor triage patients:', err);
+      setPatients([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadPatients();
+  }, [loadPatients]);
 
   const sortedPatients = useMemo(() => {
     return [...patients].sort((a, b) => {
@@ -162,12 +48,12 @@ export default function DoctorTriage() {
     const matchesQuery =
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.tier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.keyDeviation.toLowerCase().includes(searchQuery.toLowerCase());
+      (p.keyDeviation && p.keyDeviation.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesTier && matchesQuery;
   });
 
   return (
-    <div className="space-y-6 text-ink">
+    <div className="space-y-6 text-ink pb-12">
       {/* Header with Physician Metrics */}
       <div className="flex items-center justify-between gap-4 flex-wrap pb-2 border-b border-line">
         <div>
@@ -176,55 +62,103 @@ export default function DoctorTriage() {
             <h1 className="text-h1 font-display text-ink">Physician Triage Queue</h1>
           </div>
           <p className="text-sm text-ink-soft mt-1">
-            Active roster: {patients.length} assigned patients • Sorted by clinical severity (NFR2/FR4)
+            Active Clinical Roster: {patients.length} assigned patient{patients.length === 1 ? '' : 's'} • Sorted by clinical severity (NFR2/FR4)
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-critical/10 text-tier-critical border border-tier-critical/30">
-            {patients.filter((p) => p.tier === 'critical').length} Critical
-          </span>
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-high/10 text-tier-high border border-tier-high/30">
-            {patients.filter((p) => p.tier === 'high').length} High Risk
-          </span>
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-moderate/10 text-tier-moderate border border-tier-moderate/30">
-            {patients.filter((p) => p.tier === 'moderate' || p.tier === 'medium').length} Moderate
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-critical/10 text-tier-critical border border-tier-critical/30">
+              {patients.filter((p) => p.tier === 'critical').length} Critical
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-high/10 text-tier-high border border-tier-high/30">
+              {patients.filter((p) => p.tier === 'high').length} High Risk
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-moderate/10 text-tier-moderate border border-tier-moderate/30">
+              {patients.filter((p) => p.tier === 'moderate' || p.tier === 'medium').length} Moderate
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              {patients.filter((p) => p.tier === 'stable' || p.tier === 'low').length} Stable
+            </span>
+          </div>
+
+          <button
+            onClick={() => loadPatients()}
+            title="Refresh Triage Queue"
+            className="p-2 rounded-full border border-line bg-surface hover:bg-paper text-ink-soft hover:text-ink transition-colors"
+          >
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search
-            size={16}
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none"
-          />
-          <input
-            type="text"
-            className="w-full rounded-clinical border border-line pl-10 pr-4 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-            placeholder="Search patients by name, tier, or symptoms..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      {/* Loading state */}
+      {isLoading && (
+        <div className="py-16 text-center text-ink-soft">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-brand border-t-transparent mb-2" />
+          <p className="text-sm">Retrieving assigned patient roster and clinical telemetry...</p>
         </div>
+      )}
 
-        <select
-          className="rounded-clinical border border-line px-3.5 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-          value={tierFilter}
-          onChange={(e) => setTierFilter(e.target.value)}
-        >
-          <option value="all">All Tiers ({patients.length})</option>
-          <option value="critical">Critical</option>
-          <option value="high">High Risk</option>
-          <option value="moderate">Moderate</option>
-          <option value="stable">Stable</option>
-        </select>
-      </div>
+      {/* Clean Zero-State when no real patients linked */}
+      {!isLoading && patients.length === 0 && (
+        <div className="py-16 px-6 text-center space-y-4 rounded-ritual bg-surface border border-line shadow-ritual max-w-2xl mx-auto">
+          <div className="w-14 h-14 rounded-full bg-brand-light flex items-center justify-center mx-auto text-brand">
+            <Users size={28} />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-h2 font-display text-ink">No Patients Assigned Yet</h3>
+            <p className="text-sm text-ink-soft max-w-md mx-auto leading-relaxed">
+              Your physician triage queue is currently clear. When patients register and select your name in their{' '}
+              <strong className="text-ink">Profile &gt; Care Circle</strong>, their live telemetry, automated AI risk scores, and medical records will appear here in real time.
+            </p>
+          </div>
+          <button
+            onClick={() => loadPatients()}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand text-white text-sm font-semibold hover:bg-brand-dark transition-colors shadow-sm"
+          >
+            <RefreshCw size={14} />
+            <span>Refresh Roster</span>
+          </button>
+        </div>
+      )}
+
+      {/* Filter and Search Bar for Active Roster */}
+      {!isLoading && patients.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[240px]">
+            <Search
+              size={16}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none"
+            />
+            <input
+              type="text"
+              className="w-full rounded-clinical border border-line pl-10 pr-4 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+              placeholder="Search patients by name, tier, or symptoms..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <select
+            className="rounded-clinical border border-line px-3.5 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+            value={tierFilter}
+            onChange={(e) => setTierFilter(e.target.value)}
+          >
+            <option value="all">All Tiers ({patients.length})</option>
+            <option value="critical">Critical</option>
+            <option value="high">High Risk</option>
+            <option value="moderate">Moderate</option>
+            <option value="stable">Stable</option>
+            <option value="pending">Pending</option>
+          </select>
+        </div>
+      )}
 
       {/* Clinical Dense Triage Table (rounded-clinical, flat 4px radius) */}
-      <div className="rounded-clinical border border-line overflow-x-auto bg-surface shadow-sm">
-        <table className="w-full text-sm text-left">
+      {!isLoading && patients.length > 0 && (
+        <div className="rounded-clinical border border-line overflow-x-auto bg-surface shadow-sm">
+          <table className="w-full text-sm text-left">
           <thead className="bg-paper text-ink-soft uppercase text-xs tracking-wider border-b border-line">
             <tr>
               <th className="py-3 px-4 font-semibold">Patient</th>
@@ -310,6 +244,7 @@ export default function DoctorTriage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Patient Specific Modal for Medicines or Reports */}
       {activeModal && (

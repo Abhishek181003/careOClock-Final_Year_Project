@@ -1,0 +1,32 @@
+{
+  "timestamp_utc": "2026-09-16T23:51:07.074527+00:00",
+  "hardware_cores": 16,
+  "pilot_grid_points": [
+    [
+      0.01,
+      30,
+      101
+    ],
+    [
+      0.05,
+      100,
+      101
+    ]
+  ],
+  "fits_per_task": 1632,
+  "timing_measurements": {
+    "serial_w1_sec": 232.527,
+    "serial_throughput_fps": 14.0,
+    "parallel_w4_sec": 180.984,
+    "parallel_w4_speedup": 1.285,
+    "parallel_w8_sec": 181.392,
+    "parallel_w8_speedup": 1.282,
+    "parallel_w8_throughput_fps": 18.0
+  },
+  "sweep_projections": {
+    "total_sweep_tasks": 192,
+    "total_sweep_fits": 313344,
+    "projected_serial_hours": 6.2,
+    "projected_w8_minutes": 290.2
+  }
+}
