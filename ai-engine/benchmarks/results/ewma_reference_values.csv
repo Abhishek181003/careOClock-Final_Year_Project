@@ -1,0 +1,6 @@
+scenario,engine_tier,ref_tier,engine_trend_z,ref_trend_z,engine_max_z,ref_max_z,tier_match
+stable,Low,Low,0.9269,0.9269,0.17,0.17,True
+slow_drift,Moderate,Moderate,2.4604,2.4604,0.35,0.35,True
+sudden_spike,Critical,Critical,34.7467,34.7467,49.17,49.17,True
+moderate_blip,Critical,Critical,7.6325,7.6325,9.31,9.31,True
+hypotensive,High,High,2.7252,2.7252,0.72,0.72,True

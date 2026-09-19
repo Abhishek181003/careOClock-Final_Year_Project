@@ -29,6 +29,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import app
 from app.models.vitals import (
     HistoricalVitalsReading,
@@ -150,26 +151,31 @@ def test_cold_start_under_7_days():
 # =====================================================================
 
 
-def test_activation_at_7_days():
+def test_activation_at_7_days(monkeypatch):
     """Verify that reaching exactly 7 days activates the model and computes personal statistics."""
-    today = date(2026, 9, 2)
-    current = VitalsReading(patientId="P1001", systolicBp=121.0, diastolicBp=80.0, heartRate=72.0)
-    hist_7 = generate_synthetic_history(7, today, patient_id="P1001")
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        today = date(2026, 9, 2)
+        current = VitalsReading(patientId="P1001", systolicBp=121.0, diastolicBp=80.0, heartRate=72.0)
+        hist_7 = generate_synthetic_history(7, today, patient_id="P1001")
 
-    req = Layer2ScoringRequest(
-        patientId="P1001", history=hist_7, currentReading=current, currentDate=today
-    )
-    res = compute_personalized_anomaly(req)
+        req = Layer2ScoringRequest(
+            patientId="P1001", history=hist_7, currentReading=current, currentDate=today
+        )
+        res = compute_personalized_anomaly(req)
 
-    assert res.status == "active"
-    assert res.layer2_tier in ["Low", "Moderate", "High", "Critical"]
-    assert res.rolling_baseline is not None
-    assert "heart_rate" in res.rolling_baseline
-    assert "systolic_bp" in res.rolling_baseline
-    assert res.confidence == pytest.approx(7 / 28, 0.01)
-    assert res.evaluation_metadata is not None
-    assert isinstance(res.evaluation_metadata.isolation_forest_decision_function, float)
-    assert isinstance(res.evaluation_metadata.lof_decision_function, float)
+        assert res.status == "active"
+        assert res.layer2_tier in ["Low", "Moderate", "High", "Critical"]
+        assert res.rolling_baseline is not None
+        assert "heart_rate" in res.rolling_baseline
+        assert "systolic_bp" in res.rolling_baseline
+        assert res.confidence == pytest.approx(7 / 28, 0.01)
+        assert res.evaluation_metadata is not None
+        assert isinstance(res.evaluation_metadata.isolation_forest_decision_function, float)
+        assert isinstance(res.evaluation_metadata.lof_decision_function, float)
+    finally:
+        get_settings.cache_clear()
 
 
 # =====================================================================
@@ -562,27 +568,32 @@ def test_boundary_physiological_validation_a7():
 # =====================================================================
 
 
-def test_authority_separation_a6():
+def test_authority_separation_a6(monkeypatch):
     """Verify layer2_tier is the authoritative display tier and is_anomaly is in evaluation_metadata."""
-    today = date(2026, 9, 2)
-    hist = generate_synthetic_history(14, today)
-    current = VitalsReading(patientId="P1001", systolicBp=121.0, diastolicBp=80.0, heartRate=72.0)
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        today = date(2026, 9, 2)
+        hist = generate_synthetic_history(14, today)
+        current = VitalsReading(patientId="P1001", systolicBp=121.0, diastolicBp=80.0, heartRate=72.0)
 
-    res = compute_personalized_anomaly(
-        Layer2ScoringRequest(
-            patientId="P1001", history=hist, currentReading=current, currentDate=today
+        res = compute_personalized_anomaly(
+            Layer2ScoringRequest(
+                patientId="P1001", history=hist, currentReading=current, currentDate=today
+            )
         )
-    )
 
-    # Authoritative tier must be present directly
-    assert hasattr(res, "layer2_tier")
-    assert res.layer2_tier in ["Low", "Moderate", "High", "Critical"]
+        # Authoritative tier must be present directly
+        assert hasattr(res, "layer2_tier")
+        assert res.layer2_tier in ["Low", "Moderate", "High", "Critical"]
 
-    # is_anomaly must NOT be a top-level field of PersonalizedAnomalyResult (A-6)
-    assert not hasattr(res, "is_anomaly")
-    # Instead, it resides inside evaluation_metadata
-    assert hasattr(res.evaluation_metadata, "isolation_forest_is_anomaly")
-    assert isinstance(res.evaluation_metadata.isolation_forest_is_anomaly, bool)
+        # is_anomaly must NOT be a top-level field of PersonalizedAnomalyResult (A-6)
+        assert not hasattr(res, "is_anomaly")
+        # Instead, it resides inside evaluation_metadata
+        assert hasattr(res.evaluation_metadata, "isolation_forest_is_anomaly")
+        assert isinstance(res.evaluation_metadata.isolation_forest_is_anomaly, bool)
+    finally:
+        get_settings.cache_clear()
 
 
 # =====================================================================
@@ -615,35 +626,40 @@ def test_utc_day_boundary_normalization_a14():
 # =====================================================================
 
 
-def test_fastapi_layer2_endpoint_e2e():
+def test_fastapi_layer2_endpoint_e2e(monkeypatch):
     """Verify complete HTTP request/response cycle for mature 28-day patient."""
-    today = date(2026, 9, 2)
-    hist = generate_synthetic_history(28, today, sbp_base=120.0, hr_base=72.0)
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        today = date(2026, 9, 2)
+        hist = generate_synthetic_history(28, today, sbp_base=120.0, hr_base=72.0)
 
-    payload = {
-        "patientId": "P1001",
-        "history": [r.model_dump(by_alias=True, mode="json") for r in hist],
-        "currentReading": {
+        payload = {
             "patientId": "P1001",
-            "systolicBp": 121.0,
-            "diastolicBp": 80.0,
-            "heartRate": 73.0,
-            "spo2": 98.0,
-        },
-        "currentDate": today.isoformat(),
-    }
+            "history": [r.model_dump(by_alias=True, mode="json") for r in hist],
+            "currentReading": {
+                "patientId": "P1001",
+                "systolicBp": 121.0,
+                "diastolicBp": 80.0,
+                "heartRate": 73.0,
+                "spo2": 98.0,
+            },
+            "currentDate": today.isoformat(),
+        }
 
-    response = client.post("/api/v1/score/layer2", json=payload, headers=AUTH_HEADERS)
-    assert response.status_code == status.HTTP_200_OK
+        response = client.post("/api/v1/score/layer2", json=payload, headers=AUTH_HEADERS)
+        assert response.status_code == status.HTTP_200_OK
 
-    data = response.json()
-    assert data["patient_id"] == "P1001"
-    assert data["status"] == "active"
-    assert data["confidence"] == 1.0
-    assert "systolic_bp" in data["rolling_baseline"]
-    assert data["layer2_tier"] in ["Low", "Moderate", "High", "Critical"]
-    assert "evaluation_metadata" in data
-    assert data["evaluation_metadata"]["contamination_used"] == 0.05
+        data = response.json()
+        assert data["patient_id"] == "P1001"
+        assert data["status"] == "active"
+        assert data["confidence"] == 1.0
+        assert "systolic_bp" in data["rolling_baseline"]
+        assert data["layer2_tier"] in ["Low", "Moderate", "High", "Critical"]
+        assert "evaluation_metadata" in data
+        assert data["evaluation_metadata"]["contamination_used"] == 0.05
+    finally:
+        get_settings.cache_clear()
 
 
 # =====================================================================

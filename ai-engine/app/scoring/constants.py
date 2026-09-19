@@ -129,6 +129,14 @@ L2_TIER_THRESHOLDS = {
     "Low": 0.0,
 }
 
+# Layer 2 v2 EWMA Trend Detection Parameters:
+# - EWMA_LAMBDA: Smoothing weight on the newest observation (0.3 = standard SPC choice).
+# - EWMA_LOOKBACK_DAYS: Number of daily z-values fed into the EWMA (14 days).
+#   Today's reading is the 14th (newest); the window extends 13 days before today.
+#   The EWMA is standardised by dividing by sqrt(lambda / (2 - lambda)).
+EWMA_LAMBDA = 0.3
+EWMA_LOOKBACK_DAYS = 14
+
 L2_COLD_START_STATUS = "not yet available"
 
 TRACKED_VITALS = [

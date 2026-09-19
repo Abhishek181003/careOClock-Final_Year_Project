@@ -18,11 +18,11 @@ from typing import Any, Dict, List
 import numpy as np
 import httpx
 
-from app.main import app
-from app.scoring.constants import AI_ENGINE_INTERNAL_KEY_DEFAULT
-
 # Ensure ai-engine root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from app.main import app
+from app.scoring.constants import AI_ENGINE_INTERNAL_KEY_DEFAULT
 
 AUTH_HEADERS = {"X-Internal-Service-Key": AI_ENGINE_INTERNAL_KEY_DEFAULT}
 

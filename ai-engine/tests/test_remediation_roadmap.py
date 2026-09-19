@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.models.vitals import (
     HistoricalVitalsReading,
     Layer2ScoringRequest,
@@ -85,42 +85,47 @@ def _build_synthetic_history(
 # =====================================================================
 
 
-def test_finding1_statistical_baseline_arm_and_metadata():
+def test_finding1_statistical_baseline_arm_and_metadata(monkeypatch):
     """Verify layer2_tier is the statistical baseline arm and ML metrics are in evaluation_metadata."""
-    anchor = date(2026, 9, 10)
-    history = _build_synthetic_history(14, anchor)
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        anchor = date(2026, 9, 10)
+        history = _build_synthetic_history(14, anchor)
 
-    # Moderate deviation reading: SBP 140 (baseline is ~121, std ~1.0 -> z ~ 19 -> Critical)
-    current = VitalsReading(
-        patientId="PAT_REMED_01",
-        systolicBp=140.0,
-        diastolicBp=80.0,
-        heartRate=72.0,
-        recordedAt=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc),
-    )
+        # Moderate deviation reading: SBP 140 (baseline is ~121, std ~1.0 -> z ~ 19 -> Critical)
+        current = VitalsReading(
+            patientId="PAT_REMED_01",
+            systolicBp=140.0,
+            diastolicBp=80.0,
+            heartRate=72.0,
+            recordedAt=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc),
+        )
 
-    req = Layer2ScoringRequest(
-        patientId="PAT_REMED_01",
-        history=history,
-        currentReading=current,
-        currentDate=anchor,
-    )
-    result = compute_personalized_anomaly(req)
+        req = Layer2ScoringRequest(
+            patientId="PAT_REMED_01",
+            history=history,
+            currentReading=current,
+            currentDate=anchor,
+        )
+        result = compute_personalized_anomaly(req)
 
-    # layer2_tier is derived from statistical baseline z-scores
-    assert result.layer2_tier in ("Moderate", "High", "Critical")
-    assert result.max_z_score is not None
+        # layer2_tier is derived from statistical baseline z-scores
+        assert result.layer2_tier in ("Moderate", "High", "Critical")
+        assert result.max_z_score is not None
 
-    # ML benchmark metrics reside exclusively in evaluation_metadata
-    assert result.evaluation_metadata is not None
-    assert result.evaluation_metadata.isolation_forest_decision_function is not None
-    assert isinstance(result.evaluation_metadata.isolation_forest_is_anomaly, bool)
-    assert result.evaluation_metadata.lof_decision_function is not None
-    assert isinstance(result.evaluation_metadata.lof_is_anomaly, bool)
+        # ML benchmark metrics reside exclusively in evaluation_metadata
+        assert result.evaluation_metadata is not None
+        assert result.evaluation_metadata.isolation_forest_decision_function is not None
+        assert isinstance(result.evaluation_metadata.isolation_forest_is_anomaly, bool)
+        assert result.evaluation_metadata.lof_decision_function is not None
+        assert isinstance(result.evaluation_metadata.lof_is_anomaly, bool)
 
-    # Field description explicitly documents statistical baseline arm
-    field_desc = PersonalizedAnomalyResult.model_fields["layer2_tier"].description
-    assert "statistical baseline" in field_desc.lower()
+        # Field description explicitly documents statistical baseline arm
+        field_desc = PersonalizedAnomalyResult.model_fields["layer2_tier"].description
+        assert "statistical baseline" in field_desc.lower()
+    finally:
+        get_settings.cache_clear()
 
 
 # =====================================================================
@@ -213,41 +218,46 @@ def test_finding3_production_fails_closed_with_default_or_missing_key():
 # =====================================================================
 
 
-def test_finding4_contamination_parameterization():
+def test_finding4_contamination_parameterization(monkeypatch):
     """Verify calling with contamination=0.10 changes if_score without code edits."""
-    anchor = date(2026, 9, 10)
-    history = _build_synthetic_history(14, anchor, patient_id="PAT_REMED_04")
-    current = VitalsReading(
-        patientId="PAT_REMED_04",
-        systolicBp=132.0,
-        diastolicBp=82.0,
-        heartRate=75.0,
-        recordedAt=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc),
-    )
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        anchor = date(2026, 9, 10)
+        history = _build_synthetic_history(14, anchor, patient_id="PAT_REMED_04")
+        current = VitalsReading(
+            patientId="PAT_REMED_04",
+            systolicBp=132.0,
+            diastolicBp=82.0,
+            heartRate=75.0,
+            recordedAt=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc),
+        )
 
-    req = Layer2ScoringRequest(
-        patientId="PAT_REMED_04",
-        history=history,
-        currentReading=current,
-        currentDate=anchor,
-    )
+        req = Layer2ScoringRequest(
+            patientId="PAT_REMED_04",
+            history=history,
+            currentReading=current,
+            currentDate=anchor,
+        )
 
-    # Run 1: Default contamination (0.05)
-    res_default = compute_personalized_anomaly(req)
-    if_score_default = res_default.evaluation_metadata.isolation_forest_decision_function
-    assert res_default.evaluation_metadata.contamination_used == CONTAMINATION
+        # Run 1: Default contamination (0.05)
+        res_default = compute_personalized_anomaly(req)
+        if_score_default = res_default.evaluation_metadata.isolation_forest_decision_function
+        assert res_default.evaluation_metadata.contamination_used == CONTAMINATION
 
-    # Run 2: Swept contamination (0.10) passed via parameter
-    res_swept = compute_personalized_anomaly(req, contamination=0.10)
-    if_score_swept = res_swept.evaluation_metadata.isolation_forest_decision_function
-    assert res_swept.evaluation_metadata.contamination_used == 0.10
+        # Run 2: Swept contamination (0.10) passed via parameter
+        res_swept = compute_personalized_anomaly(req, contamination=0.10)
+        if_score_swept = res_swept.evaluation_metadata.isolation_forest_decision_function
+        assert res_swept.evaluation_metadata.contamination_used == 0.10
 
-    # Decision function output shifts due to the offset_ quantile changing
-    assert if_score_default != if_score_swept
+        # Decision function output shifts due to the offset_ quantile changing
+        assert if_score_default != if_score_swept
 
-    # Run 3: Swept contamination (0.15) passed via parameter
-    res_param_15 = compute_personalized_anomaly(req, contamination=0.15)
-    assert res_param_15.evaluation_metadata.contamination_used == 0.15
+        # Run 3: Swept contamination (0.15) passed via parameter
+        res_param_15 = compute_personalized_anomaly(req, contamination=0.15)
+        assert res_param_15.evaluation_metadata.contamination_used == 0.15
+    finally:
+        get_settings.cache_clear()
 
     # Run 4: Verify patient-facing request schema does NOT expose test dials
     with pytest.raises(ValidationError):

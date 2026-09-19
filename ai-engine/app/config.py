@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     # Defaults to shared dev key; MUST be replaced in production
     AI_ENGINE_INTERNAL_KEY: str = AI_ENGINE_INTERNAL_KEY_DEFAULT
 
+    # Layer 2 ML Benchmark Arms Toggle (v2)
+    # When False (default), the live /api/v1/score/layer2 path skips fitting
+    # Isolation Forest and LOF, returning evaluation_metadata = None.
+    # When True, IF/LOF are fitted per-request and evaluation_metadata is populated.
+    # The benchmark harness sets this to True via environment variable.
+    ENABLE_ML_BENCHMARK_ARMS: bool = False
+
     # CORS & Allowed Origins
     ALLOWED_ORIGINS: str = "http://localhost:5000,http://localhost:5173"
 

@@ -2,16 +2,20 @@
 
 """CareOClock AI Engine — Layer 2: Personalized Anomaly Detection (FR4).
 
+v2 Upgrade: EWMA Trend Detection
+---------------------------------
 Evaluates patient physiological readings against personal historical baselines:
-1. Authoritative Clinical Arm (Statistical Baseline):
-   - layer2_tier is derived deterministically from the maximum standardized |z|-score
-     deviation across active vitals, ensuring clinical interpretability and exact
-     adherence to physician-approved escalation thresholds (Finding 1).
-2. Machine Learning Benchmark Arms (Phase 12 Sensitivity & Comparison):
+1. Authoritative Clinical Arm (v2 EWMA Trend Statistic):
+   - For each active vital, compute daily z-scores over the last 14 days (including
+     today's reading) using the patient's trailing 28-day baseline.
+   - Apply EWMA smoothing (lambda=0.3), standardise, and take max |smoothed_z|.
+   - Spike guard: if today's own max |z| >= 3.5, tier is at least Critical.
+   - layer2_tier is derived from the EWMA trend statistic.
+2. Machine Learning Benchmark Arms (gated by ENABLE_ML_BENCHMARK_ARMS):
    - scikit-learn IsolationForest and LocalOutlierFactor are fit statelessly per-request
      on the patient's scaled rolling feature matrix.
-   - Raw decision_function scores, outlier predictions, and contamination rates are
-     isolated exclusively in evaluation_metadata for model sensitivity sweeps and benchmarking.
+   - Only fitted when ENABLE_ML_BENCHMARK_ARMS=True (default False).
+   - Raw metrics isolated in evaluation_metadata for benchmarking only.
 
 Architectural & Security Safeguards:
 - Strict Patient Privacy: Zero cross-patient comparison or global baseline aggregation.
@@ -23,7 +27,7 @@ Architectural & Security Safeguards:
 - H-13 & A-14: Window leak boundary enforcement (history strictly precedes today in UTC).
 - A-4: Single-day gap imputation (forward-fill / rolling mean) + explicit missingness flag.
 - A-5: Per-feature history tracking supporting mid-monitoring device upgrades.
-- A-6 & Finding 1: Authority separation — layer2_tier driven from statistical baseline max |z|;
+- A-6 & Finding 1: Authority separation — layer2_tier driven from EWMA trend statistic;
   raw ML model metrics isolated in evaluation_metadata.
 - A-8: Log-redaction hygiene — raw health readings are never logged with patient_id.
 - A-10: Feature matrix columns comprise [day_mean, day_variability, missing_flag] per vital.
@@ -40,6 +44,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 
+from app.config import get_settings
 from app.models.vitals import (
     EvaluationMetadata,
     FeatureDeviation,
@@ -52,6 +57,8 @@ from app.scoring.constants import (
     CLINICAL_DISCLAIMER,
     CONTAMINATION,
     DEFAULT_N_ESTIMATORS,
+    EWMA_LAMBDA,
+    EWMA_LOOKBACK_DAYS,
     L2_COLD_START_STATUS,
     L2_TIER_THRESHOLDS,
     MATURE_WINDOW_DAYS,
@@ -203,7 +210,8 @@ def compute_baseline_statistics(
 ) -> Dict[str, Dict[str, float]]:
     """Compute rolling baseline mean, sample standard deviation, and sample count per active vital.
 
-    Only uses valid, non-imputed readings across the historical window.
+    v2 fix: stores UNROUNDED mean and std for z-score computation.
+    Rounded values are provided as 'mean_display' and 'std_display' for API responses.
     """
     baseline: Dict[str, Dict[str, float]] = {}
 
@@ -224,8 +232,10 @@ def compute_baseline_statistics(
         std_val = float(np.std(arr, ddof=1)) if count > 1 else 0.0
 
         baseline[v] = {
-            "mean": round(mean_val, 2),
-            "std": round(std_val, 2),
+            "mean": mean_val,  # v2: unrounded for z-computation
+            "std": std_val,    # v2: unrounded for z-computation
+            "mean_display": round(mean_val, 2),  # for API response
+            "std_display": round(std_val, 2),     # for API response
             "count": float(count),
         }
 
@@ -327,6 +337,99 @@ def classify_anomaly_tier(max_z: float) -> str:
     return "Low"
 
 
+def _compute_daily_z(
+    value: float,
+    mean: float,
+    std: float,
+) -> float:
+    """Compute standardised z-score with zero-variance clamp.
+
+    Spec: if std < 1e-6 and |v - mean| < 1e-6 -> 0; if |v - mean| >= 1e-6 -> clamp to +-3.5.
+    """
+    if std >= 1e-6:
+        return (value - mean) / std
+    diff = value - mean
+    if abs(diff) < 1e-6:
+        return 0.0
+    return 3.5 if diff > 0 else -3.5
+
+
+def compute_ewma_trend(
+    day_aggregations: List[DayVitalAggregation],
+    today_reading: VitalsReading,
+    today_date: date,
+    active_vitals: List[str],
+    baseline_stats: Dict[str, Dict[str, float]],
+    days_of_history: Dict[str, int],
+) -> Tuple[float, Dict[str, float]]:
+    """Compute EWMA trend statistic across active vitals.
+
+    v2 design (approved, simpler version):
+    - Use ONE baseline (today's trailing 28-day mean/std, unrounded) for all 14 days.
+    - For each active vital, extract the daily value for each of the last 14 days
+      (13 historical days + today's reading as the newest).
+    - z_d = (x_d - mu) / sigma, with zero-variance clamp. Missing/inactive days contribute z=0.
+    - EWMA: S[0] = z[oldest], S[t] = lambda * z[t] + (1-lambda) * S[t-1]
+    - Standardise: smoothed_z = S[-1] / sqrt(lambda / (2 - lambda))
+    - trend_z = max(|smoothed_z|) over active vitals.
+
+    Returns: (trend_z, {vital: smoothed_z_value})
+    """
+    lam = EWMA_LAMBDA
+    lookback = EWMA_LOOKBACK_DAYS
+    ewma_sigma = np.sqrt(lam / (2.0 - lam))
+
+    # Build a date-indexed lookup of day aggregations for quick access
+    day_lookup: Dict[date, DayVitalAggregation] = {d.date: d for d in day_aggregations}
+
+    # The 14 dates: today_date - 13 through today_date (today is newest)
+    lookback_dates = [today_date - timedelta(days=i) for i in range(lookback - 1, -1, -1)]
+
+    smoothed_deviations: Dict[str, float] = {}
+
+    for vital in active_vitals:
+        mean = baseline_stats[vital]["mean"]
+        std = baseline_stats[vital]["std"]
+
+        # Build array of 14 daily z-values
+        z_values: List[float] = []
+        for d in lookback_dates:
+            if d == today_date:
+                # Today's reading: use currentReading
+                curr_val = getattr(today_reading, vital, None)
+                if curr_val is not None:
+                    z = _compute_daily_z(float(curr_val), mean, std)
+                else:
+                    z = 0.0
+            else:
+                # Historical day: look up aggregation
+                day_agg = day_lookup.get(d)
+                if day_agg is not None:
+                    val, _ = day_agg.get_vital_values(vital)
+                    if val is not None:
+                        z = _compute_daily_z(val, mean, std)
+                    else:
+                        z = 0.0  # Missing vital on this day
+                else:
+                    z = 0.0  # No reading on this day
+
+            z_values.append(z)
+
+        # EWMA recursive computation
+        s = z_values[0]
+        for t in range(1, len(z_values)):
+            s = lam * z_values[t] + (1.0 - lam) * s
+
+        # Standardise
+        smoothed_z = s / ewma_sigma if ewma_sigma > 0 else 0.0
+        smoothed_deviations[vital] = round(float(smoothed_z), 4)
+
+    # trend_z = max |smoothed_z| across active vitals
+    trend_z = max((abs(v) for v in smoothed_deviations.values()), default=0.0)
+
+    return round(float(trend_z), 4), smoothed_deviations
+
+
 def compute_personalized_anomaly(
     request: Layer2ScoringRequest,
     contamination: Optional[float] = None,
@@ -334,16 +437,16 @@ def compute_personalized_anomaly(
 ) -> PersonalizedAnomalyResult:
     """Execute Layer 2 Personalized Anomaly Detection for a single patient.
 
+    v2: Tier is driven by EWMA trend statistic with spike guard.
     Zero cross-patient comparison: Evaluates strictly within the patient's own historical data.
-    Stateless refit on demand: Fits IsolationForest and LocalOutlierFactor in < 5ms.
-    Authoritative tier is driven by the statistical baseline z-score distribution,
-    while Isolation Forest and LOF results are benchmark arms recorded in evaluation_metadata.
+    ML benchmark arms (IF/LOF) are gated by ENABLE_ML_BENCHMARK_ARMS setting.
 
     Parameters:
     - contamination: Optional override for sensitivity sweeps (internal/testing only).
     - n_estimators: Optional tree count override for efficiency/AUROC benchmarking (internal/testing only).
     """
     patient_id = request.patient_id
+    settings = get_settings()
 
     # Resolve effective hyperparameters (Finding 4 & Phase 2 Optimization)
     effective_contamination = contamination if contamination is not None else CONTAMINATION
@@ -391,50 +494,18 @@ def compute_personalized_anomaly(
             max_z_score=None,
             feature_deviations=None,
             detailed_deviations=None,
+            smoothed_deviations=None,
+            trend_z_score=None,
             confidence=None,
             evaluation_metadata=None,
             disclaimer=CLINICAL_DISCLAIMER,
         )
 
-    # 4. Compute personal rolling baseline statistics
+    # 4. Compute personal rolling baseline statistics (v2: unrounded)
     baseline_stats = compute_baseline_statistics(day_aggregations, active_features)
 
-    # 5. Build N x (3 x D) training matrix (A-4, A-10)
-    X_raw = build_feature_matrix(day_aggregations, active_features, baseline_stats)
-    x_today_raw = build_today_vector(request.current_reading, active_features, baseline_stats)
-
-    # 6. Apply per-patient StandardScaler (H-12, A-17)
-    # StandardScaler is mandatory for LOF (distance-based, heterogeneous units: mmHg, bpm, °C)
-    # and invariant for IsolationForest (tree-based splits).
-    scaler = StandardScaler().fit(X_raw)
-    X_scaled = scaler.transform(X_raw)
-    x_today_scaled = scaler.transform(x_today_raw)
-
-    # 7. Stateless model fitting: Isolation Forest & Local Outlier Factor (A-2, A-18, H-11, Finding 4)
-    if_model = IsolationForest(
-        random_state=RANDOM_SEED,
-        contamination=effective_contamination,
-        n_estimators=effective_n_estimators,
-    ).fit(X_scaled)
-
-    if_score = float(if_model.decision_function(x_today_scaled)[0])
-    if_pred = int(if_model.predict(x_today_scaled)[0])
-    if_is_anomaly = bool(if_pred == -1)
-
-    # Mandatory LOF comparison baseline (A-2, A-18, Finding 4)
-    n_samples = X_scaled.shape[0]
-    n_neighbors = min(20, max(1, n_samples - 1))
-    lof_model = LocalOutlierFactor(
-        novelty=True,
-        contamination=effective_contamination,
-        n_neighbors=n_neighbors,
-    ).fit(X_scaled)
-
-    lof_score = float(lof_model.decision_function(x_today_scaled)[0])
-    lof_pred = int(lof_model.predict(x_today_scaled)[0])
-    lof_is_anomaly = bool(lof_pred == -1)
-
-    # 8. Compute per-feature clinical z-scores & deviations (H-2, Spec §6.10)
+    # 5. Compute per-feature clinical z-scores & deviations for TODAY (H-2, Spec §6.10)
+    #    These are kept for explanations and backward compatibility.
     detailed_deviations: List[FeatureDeviation] = []
     feature_deviations: Dict[str, float] = {}
 
@@ -446,15 +517,7 @@ def compute_personalized_anomaly(
         mean = baseline_stats[v]["mean"]
         std = baseline_stats[v]["std"]
 
-        # Safe division handling near-zero standard deviation
-        if std > 1e-4:
-            z = (curr_val - mean) / std
-        else:
-            diff = curr_val - mean
-            if abs(diff) < 1e-4:
-                z = 0.0
-            else:
-                z = 3.5 if diff > 0 else -3.5
+        z = _compute_daily_z(float(curr_val), mean, std)
 
         z_rounded = round(float(z), 2)
         feature_deviations[v] = z_rounded
@@ -470,8 +533,8 @@ def compute_personalized_anomaly(
             FeatureDeviation(
                 feature=v,
                 current_value=round(float(curr_val), 2),
-                baseline_mean=mean,
-                baseline_std=std,
+                baseline_mean=baseline_stats[v]["mean_display"],
+                baseline_std=baseline_stats[v]["std_display"],
                 z_score=z_rounded,
                 direction=direction,
             )
@@ -480,32 +543,96 @@ def compute_personalized_anomaly(
     # Sort detailed deviations by absolute z-score descending for doctor triage
     detailed_deviations.sort(key=lambda d: abs(d.z_score), reverse=True)
 
-    # 9. Derive authoritative Layer 2 risk tier from max |z| (A-3, H-2, Finding 1)
+    # Today's max |z| (kept for backward compatibility and spike guard)
     max_z = max((abs(d.z_score) for d in detailed_deviations), default=0.0)
     max_z_rounded = round(max_z, 2)
-    layer2_tier = classify_anomaly_tier(max_z_rounded)
 
-    # 10. Confidence scaling toward mature 28-day baseline
+    # 6. Compute EWMA trend statistic (v2)
+    trend_z, smoothed_devs = compute_ewma_trend(
+        day_aggregations=day_aggregations,
+        today_reading=request.current_reading,
+        today_date=today_date,
+        active_vitals=active_features,
+        baseline_stats=baseline_stats,
+        days_of_history=days_of_history,
+    )
+
+    # 7. Derive Layer 2 risk tier from EWMA trend_z (v2)
+    layer2_tier = classify_anomaly_tier(trend_z)
+
+    # Spike guard: if today's own max |z| >= 3.5, tier is at least Critical
+    if max_z_rounded >= L2_TIER_THRESHOLDS["Critical"]:
+        tier_ranks = {"Low": 0, "Moderate": 1, "High": 2, "Critical": 3}
+        if tier_ranks.get(layer2_tier, 0) < tier_ranks["Critical"]:
+            layer2_tier = "Critical"
+
+    # 8. Build training matrix and ML models ONLY if enabled
+    eval_metadata = None
+    if settings.ENABLE_ML_BENCHMARK_ARMS:
+        X_raw = build_feature_matrix(day_aggregations, active_features, baseline_stats)
+        x_today_raw = build_today_vector(request.current_reading, active_features, baseline_stats)
+
+        # Apply per-patient StandardScaler (H-12, A-17)
+        scaler = StandardScaler().fit(X_raw)
+        X_scaled = scaler.transform(X_raw)
+        x_today_scaled = scaler.transform(x_today_raw)
+
+        # Stateless model fitting: Isolation Forest (A-2, A-18, H-11, Finding 4)
+        if_model = IsolationForest(
+            random_state=RANDOM_SEED,
+            contamination=effective_contamination,
+            n_estimators=effective_n_estimators,
+        ).fit(X_scaled)
+
+        if_score = float(if_model.decision_function(x_today_scaled)[0])
+        if_pred = int(if_model.predict(x_today_scaled)[0])
+        if_is_anomaly = bool(if_pred == -1)
+
+        # Mandatory LOF comparison baseline (A-2, A-18, Finding 4)
+        n_samples = X_scaled.shape[0]
+        n_neighbors = min(20, max(1, n_samples - 1))
+        lof_model = LocalOutlierFactor(
+            novelty=True,
+            contamination=effective_contamination,
+            n_neighbors=n_neighbors,
+        ).fit(X_scaled)
+
+        lof_score = float(lof_model.decision_function(x_today_scaled)[0])
+        lof_pred = int(lof_model.predict(x_today_scaled)[0])
+        lof_is_anomaly = bool(lof_pred == -1)
+
+        eval_metadata = EvaluationMetadata(
+            isolation_forest_decision_function=round(if_score, 4),
+            isolation_forest_is_anomaly=if_is_anomaly,
+            lof_decision_function=round(lof_score, 4),
+            lof_is_anomaly=lof_is_anomaly,
+            contamination_used=effective_contamination,
+            n_estimators_used=effective_n_estimators,
+        )
+
+    # 9. Confidence scaling toward mature 28-day baseline
     confidence = min(round(total_calendar_days / MATURE_WINDOW_DAYS, 2), 1.0)
 
-    # 11. Prepare non-UI evaluation metadata for Phase 12 benchmarks (A-6, Finding 4)
-    eval_metadata = EvaluationMetadata(
-        isolation_forest_decision_function=round(if_score, 4),
-        isolation_forest_is_anomaly=if_is_anomaly,
-        lof_decision_function=round(lof_score, 4),
-        lof_is_anomaly=lof_is_anomaly,
-        contamination_used=effective_contamination,
-        n_estimators_used=effective_n_estimators,
-    )
+    # 10. Prepare rolling baseline for API response (display-rounded values)
+    rolling_baseline_display = {
+        v: {
+            "mean": baseline_stats[v]["mean_display"],
+            "std": baseline_stats[v]["std_display"],
+            "count": baseline_stats[v]["count"],
+        }
+        for v in baseline_stats
+    }
 
     # Safe log redaction (A-8)
     logger.info(
-        "Layer 2 evaluated for patient %s. History days: %d. Active features: %s. Tier: %s. Max |z|: %.2f",
+        "Layer 2 evaluated for patient %s. History days: %d. Active features: %s. "
+        "Tier: %s. Max |z|: %.2f. Trend |z|: %.2f",
         patient_id,
         total_calendar_days,
         active_features,
         layer2_tier,
         max_z_rounded,
+        trend_z,
     )
 
     return PersonalizedAnomalyResult(
@@ -515,11 +642,13 @@ def compute_personalized_anomaly(
         days_of_history=days_of_history,
         days_of_history_total=total_calendar_days,
         active_features=active_features,
-        rolling_baseline=baseline_stats,
+        rolling_baseline=rolling_baseline_display,
         layer2_tier=layer2_tier,
         max_z_score=max_z_rounded,
         feature_deviations=feature_deviations,
         detailed_deviations=detailed_deviations,
+        smoothed_deviations=smoothed_devs,
+        trend_z_score=trend_z,
         confidence=confidence,
         evaluation_metadata=eval_metadata,
         disclaimer=CLINICAL_DISCLAIMER,

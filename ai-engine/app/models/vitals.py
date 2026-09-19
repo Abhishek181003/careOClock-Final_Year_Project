@@ -429,6 +429,14 @@ class PersonalizedAnomalyResult(BaseModel):
         default=None,
         description="Full clinical deviation breakdown sorted by absolute z-score descending",
     )
+    smoothed_deviations: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Per-vital EWMA-smoothed trend z-score (v2: 14-day lookback, lambda=0.3)",
+    )
+    trend_z_score: Optional[float] = Field(
+        default=None,
+        description="Maximum absolute smoothed trend z-score across active vitals (drives layer2_tier in v2)",
+    )
     confidence: Optional[float] = Field(
         default=None,
         ge=0.0,

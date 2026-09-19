@@ -22,6 +22,7 @@ from app.models.vitals import (
     Layer2ScoringRequest,
     VitalsReading,
 )
+from app.config import get_settings
 from app.scoring.constants import DEFAULT_N_ESTIMATORS
 from app.scoring.personalized_anomaly import (
     DayVitalAggregation,
@@ -202,62 +203,74 @@ def test_vectorized_build_today_vector_exact_equivalence():
 # =====================================================================
 
 
-def test_isolation_forest_n_estimators_parameterization():
+def test_isolation_forest_n_estimators_parameterization(monkeypatch):
     """Verify n_estimators can be tuned empirically and is recorded in evaluation_metadata."""
-    anchor = date(2026, 9, 15)
-    history = _generate_test_history(14, anchor)
-    current = VitalsReading(
-        patientId="PAT_OPT_01",
-        systolicBp=125.0,
-        diastolicBp=82.0,
-        heartRate=74.0,
-    )
-    req = Layer2ScoringRequest(
-        patientId="PAT_OPT_01",
-        history=history,
-        currentReading=current,
-        currentDate=anchor,
-    )
+    # v2: Enable ML benchmark arms for this test
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        anchor = date(2026, 9, 15)
+        history = _generate_test_history(14, anchor)
+        current = VitalsReading(
+            patientId="PAT_OPT_01",
+            systolicBp=125.0,
+            diastolicBp=82.0,
+            heartRate=74.0,
+        )
+        req = Layer2ScoringRequest(
+            patientId="PAT_OPT_01",
+            history=history,
+            currentReading=current,
+            currentDate=anchor,
+        )
 
-    # Default n_estimators (100)
-    res_default = compute_personalized_anomaly(req)
-    assert res_default.evaluation_metadata.n_estimators_used == DEFAULT_N_ESTIMATORS
-    assert res_default.evaluation_metadata.n_estimators_used == 100
+        # Default n_estimators (100)
+        res_default = compute_personalized_anomaly(req)
+        assert res_default.evaluation_metadata.n_estimators_used == DEFAULT_N_ESTIMATORS
+        assert res_default.evaluation_metadata.n_estimators_used == 100
 
-    # Explicit n_estimators=50 (efficiency tuning candidate for Phase 4)
-    res_50 = compute_personalized_anomaly(req, n_estimators=50)
-    assert res_50.evaluation_metadata.n_estimators_used == 50
+        # Explicit n_estimators=50 (efficiency tuning candidate for Phase 4)
+        res_50 = compute_personalized_anomaly(req, n_estimators=50)
+        assert res_50.evaluation_metadata.n_estimators_used == 50
 
-    # Explicit n_estimators=30
-    res_30 = compute_personalized_anomaly(req, n_estimators=30)
-    assert res_30.evaluation_metadata.n_estimators_used == 30
+        # Explicit n_estimators=30
+        res_30 = compute_personalized_anomaly(req, n_estimators=30)
+        assert res_30.evaluation_metadata.n_estimators_used == 30
+    finally:
+        get_settings.cache_clear()
 
 
-def test_deterministic_seed_reproducibility():
+def test_deterministic_seed_reproducibility(monkeypatch):
     """Verify that repeated runs with the same n_estimators and fixed seed produce bit-for-bit identical scores."""
-    anchor = date(2026, 9, 15)
-    history = _generate_test_history(14, anchor)
-    current = VitalsReading(
-        patientId="PAT_OPT_01",
-        systolicBp=135.0,
-        diastolicBp=85.0,
-        heartRate=80.0,
-    )
-    req = Layer2ScoringRequest(
-        patientId="PAT_OPT_01",
-        history=history,
-        currentReading=current,
-        currentDate=anchor,
-    )
+    # v2: Enable ML benchmark arms for this test
+    monkeypatch.setenv("ENABLE_ML_BENCHMARK_ARMS", "true")
+    get_settings.cache_clear()
+    try:
+        anchor = date(2026, 9, 15)
+        history = _generate_test_history(14, anchor)
+        current = VitalsReading(
+            patientId="PAT_OPT_01",
+            systolicBp=135.0,
+            diastolicBp=85.0,
+            heartRate=80.0,
+        )
+        req = Layer2ScoringRequest(
+            patientId="PAT_OPT_01",
+            history=history,
+            currentReading=current,
+            currentDate=anchor,
+        )
 
-    res_a = compute_personalized_anomaly(req, n_estimators=50)
-    res_b = compute_personalized_anomaly(req, n_estimators=50)
+        res_a = compute_personalized_anomaly(req, n_estimators=50)
+        res_b = compute_personalized_anomaly(req, n_estimators=50)
 
-    # Identical decision function output
-    score_a = res_a.evaluation_metadata.isolation_forest_decision_function
-    score_b = res_b.evaluation_metadata.isolation_forest_decision_function
-    assert score_a == score_b
-    assert res_a.layer2_tier == res_b.layer2_tier
+        # Identical decision function output
+        score_a = res_a.evaluation_metadata.isolation_forest_decision_function
+        score_b = res_b.evaluation_metadata.isolation_forest_decision_function
+        assert score_a == score_b
+        assert res_a.layer2_tier == res_b.layer2_tier
+    finally:
+        get_settings.cache_clear()
 
 
 # =====================================================================
