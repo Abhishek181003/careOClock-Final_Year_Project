@@ -1025,7 +1025,7 @@ export default function HealthPage() {
                   Layer 2: Personal Baseline Pattern AI
                 </span>
                 <p className="text-xs text-ink-soft leading-relaxed">
-                  Uses an Isolation Forest machine learning model that learns your personal "normal" over 7 to 14 days.
+                  Uses an Isolation Forest machine learning model that learns your personal &quot;normal&quot; over 7 to 14 days.
                   It detects subtle, multi-parameter shifts (e.g., heart rate slowly rising while SpO2 gradually dips)
                   before acute distress occurs.
                 </p>
@@ -1033,7 +1033,7 @@ export default function HealthPage() {
             </div>
 
             <div className="p-3 rounded-ritual bg-blue-50 border border-blue-200 text-blue-950 text-xs leading-relaxed">
-              <strong>Physician Continuity:</strong> Any high risk or anomaly automatically alerts your assigned doctor's
+              <strong>Physician Continuity:</strong> Any high risk or anomaly automatically alerts your assigned doctor&apos;s
               triage queue so they can review your history and adjust medication if needed.
             </div>
 

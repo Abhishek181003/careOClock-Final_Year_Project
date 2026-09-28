@@ -1,13 +1,13 @@
 concurrency,history_days,wall_time_sec,throughput_rps,lat_min_ms,lat_p50_ms,lat_p90_ms,lat_p95_ms,lat_p99_ms,lat_max_ms,error_rate,nfr2_sla_met,workers,topology
-50,28,0.105,474.2,71.2,81.7,90.8,91.4,92.3,92.5,0.0,True,1,"In-Process (ASGITransport, GIL-Bound)"
-100,28,0.236,423.6,110.4,184.5,207.6,211.3,213.6,213.7,0.0,True,1,"In-Process (ASGITransport, GIL-Bound)"
-50,28,0.289,173.0,66.4,150.8,240.1,243.4,254.9,261.7,0.0,True,2,Uvicorn Process Pool (W=2)
-100,28,0.656,152.5,118.3,328.1,554.3,564.1,580.7,602.1,0.0,True,2,Uvicorn Process Pool (W=2)
-50,28,0.258,193.8,62.3,139.9,218.3,223.2,231.7,233.6,0.0,True,4,Uvicorn Process Pool (W=4)
-100,28,0.628,159.3,115.7,329.3,543.5,560.2,597.9,606.1,0.0,True,4,Uvicorn Process Pool (W=4)
-50,28,0.332,150.7,89.3,181.2,263.2,280.4,291.7,292.5,0.0,True,8,Uvicorn Process Pool (W=8)
-100,28,30.231,3.3,145.2,468.3,717.6,2245.9,30193.7,30200.7,0.05,False,8,Uvicorn Process Pool (W=8)
-50,28,0.343,145.7,68.3,168.6,284.1,297.2,312.5,316.4,0.0,True,12,Uvicorn Process Pool (W=12)
-100,28,0.788,127.0,186.3,361.5,644.9,657.2,712.7,727.8,0.0,True,12,Uvicorn Process Pool (W=12)
-50,28,0.327,152.8,71.3,170.1,273.4,283.0,291.4,295.9,0.0,True,16,Uvicorn Process Pool (W=16)
-100,28,0.714,140.0,140.1,347.9,612.6,629.6,642.3,667.3,0.0,True,16,Uvicorn Process Pool (W=16)
+50,28,0.079,629.1,50.4,60.5,69.2,70.5,72.7,74.2,0.0,True,1,"In-Process (ASGITransport, GIL-Bound)"
+100,28,0.186,538.2,96.1,147.1,158.7,160.9,162.5,166.4,0.0,True,1,"In-Process (ASGITransport, GIL-Bound)"
+50,28,0.175,284.9,42.1,94.3,141.7,150.5,156.2,158.7,0.0,True,2,Uvicorn Process Pool (W=2)
+100,28,0.422,236.9,72.4,218.3,361.5,375.7,399.0,403.4,0.0,True,2,Uvicorn Process Pool (W=2)
+50,28,0.192,260.5,45.9,97.8,158.2,160.7,165.0,166.9,0.0,True,4,Uvicorn Process Pool (W=4)
+100,28,0.385,259.7,75.2,181.3,322.5,332.6,348.5,350.4,0.0,True,4,Uvicorn Process Pool (W=4)
+50,28,0.266,188.2,62.1,140.7,219.6,223.8,231.8,232.0,0.0,True,8,Uvicorn Process Pool (W=8)
+100,28,0.708,141.3,136.0,361.6,589.9,602.2,641.1,671.6,0.0,True,8,Uvicorn Process Pool (W=8)
+50,28,0.187,267.0,43.4,101.9,150.2,152.3,161.6,163.9,0.0,True,12,Uvicorn Process Pool (W=12)
+100,28,0.455,219.7,112.0,207.4,362.2,369.0,415.3,422.7,0.0,True,12,Uvicorn Process Pool (W=12)
+50,28,0.238,210.4,51.8,120.2,197.2,202.9,209.4,213.7,0.0,True,16,Uvicorn Process Pool (W=16)
+100,28,0.565,177.0,97.0,294.0,480.6,489.8,504.6,519.6,0.0,True,16,Uvicorn Process Pool (W=16)

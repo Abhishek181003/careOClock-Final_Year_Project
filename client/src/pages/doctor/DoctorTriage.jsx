@@ -1,10 +1,15 @@
 import { Fragment, useEffect, useMemo, useState, useCallback } from 'react';
-import { Search, Stethoscope, X, Pill, FileText, Activity, RefreshCw, Users } from 'lucide-react';
+import {
+  Search, Stethoscope, X, Pill, FileText, Activity,
+  RefreshCw, Users, AlertOctagon, PhoneCall, AlertTriangle,
+  CheckCircle2, ChevronDown, ChevronUp, ShieldAlert,
+} from 'lucide-react';
 import { api } from '../../api/client';
 import RiskBadge from '../../components/RiskBadge';
 import AssessmentCard from '../../components/AssessmentCard';
 import MedicineManager from '../../components/MedicineManager';
 import ReportManager from '../../components/ReportManager';
+import '../../components/dashboards/Dashboards.css';
 
 const TIER_RANK = { critical: 0, high: 1, moderate: 2, medium: 2, stable: 3, low: 3, pending: 4 };
 
@@ -13,10 +18,11 @@ export default function DoctorTriage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [tierFilter, setTierFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('severity'); // 'severity' | 'name' | 'score'
   const [expandedId, setExpandedId] = useState(null);
   const [activeModal, setActiveModal] = useState(null); // { type: 'medicines' | 'reports', patient: object }
 
-  // Load real assigned patients from backend with zero dummy fallbacks
+  // Load assigned patients from backend
   const loadPatients = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -34,236 +40,435 @@ export default function DoctorTriage() {
     loadPatients();
   }, [loadPatients]);
 
+  // Counts by tier
+  const tierCounts = useMemo(() => {
+    const counts = { critical: 0, high: 0, moderate: 0, stable: 0, pending: 0 };
+    for (const p of patients) {
+      const t = (p.tier || 'pending').toLowerCase();
+      if (t === 'critical') counts.critical++;
+      else if (t === 'high') counts.high++;
+      else if (t === 'moderate' || t === 'medium') counts.moderate++;
+      else if (t === 'stable' || t === 'low') counts.stable++;
+      else counts.pending++;
+    }
+    return counts;
+  }, [patients]);
+
   const sortedPatients = useMemo(() => {
     return [...patients].sort((a, b) => {
+      if (sortBy === 'name') {
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      if (sortBy === 'score') {
+        return (b.riskScore || 0) - (a.riskScore || 0);
+      }
+      // Default: severity tier rank then score
       const rankA = TIER_RANK[a.tier] ?? 99;
       const rankB = TIER_RANK[b.tier] ?? 99;
       if (rankA !== rankB) return rankA - rankB;
       return (b.riskScore || 0) - (a.riskScore || 0);
     });
-  }, [patients]);
+  }, [patients, sortBy]);
 
-  const filteredPatients = sortedPatients.filter((p) => {
-    const matchesTier = tierFilter === 'all' || p.tier === tierFilter;
-    const matchesQuery =
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.tier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.keyDeviation && p.keyDeviation.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesTier && matchesQuery;
-  });
+  const filteredPatients = useMemo(() => {
+    return sortedPatients.filter((p) => {
+      const matchesTier =
+        tierFilter === 'all' ||
+        p.tier === tierFilter ||
+        (tierFilter === 'moderate' && p.tier === 'medium') ||
+        (tierFilter === 'stable' && p.tier === 'low');
+
+      const q = searchQuery.toLowerCase().trim();
+      const matchesQuery =
+        !q ||
+        (p.name && p.name.toLowerCase().includes(q)) ||
+        (p.tier && p.tier.toLowerCase().includes(q)) ||
+        (p.keyDeviation && p.keyDeviation.toLowerCase().includes(q));
+
+      return matchesTier && matchesQuery;
+    });
+  }, [sortedPatients, tierFilter, searchQuery]);
+
+  const toggleTierFilter = (tier) => {
+    setTierFilter((prev) => (prev === tier ? 'all' : tier));
+  };
 
   return (
-    <div className="space-y-6 text-ink pb-12">
-      {/* Header with Physician Metrics */}
-      <div className="flex items-center justify-between gap-4 flex-wrap pb-2 border-b border-line">
+    <div className="dash dash--wide dash-enter">
+      {/* ── Physician Header ────────────────────────────────────── */}
+      <div className="doc-header">
         <div>
-          <div className="flex items-center gap-2">
-            <Stethoscope size={24} className="text-brand" />
-            <h1 className="text-h1 font-display text-ink">Physician Triage Queue</h1>
+          <div className="doc-header__title">
+            <Stethoscope size={26} style={{ color: '#1D6F64' }} />
+            <span>Physician Triage Queue</span>
           </div>
-          <p className="text-sm text-ink-soft mt-1">
-            Active Clinical Roster: {patients.length} assigned patient{patients.length === 1 ? '' : 's'} • Sorted by clinical severity (NFR2/FR4)
-          </p>
+          <div className="doc-header__subtitle">
+            Active Clinical Roster: {patients.length} assigned patient{patients.length === 1 ? '' : 's'} • Prioritized by dual-layer risk score
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-critical/10 text-tier-critical border border-tier-critical/30">
-              {patients.filter((p) => p.tier === 'critical').length} Critical
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-high/10 text-tier-high border border-tier-high/30">
-              {patients.filter((p) => p.tier === 'high').length} High Risk
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-tier-moderate/10 text-tier-moderate border border-tier-moderate/30">
-              {patients.filter((p) => p.tier === 'moderate' || p.tier === 'medium').length} Moderate
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              {patients.filter((p) => p.tier === 'stable' || p.tier === 'low').length} Stable
-            </span>
-          </div>
-
+        <div className="flex items-center gap-2">
           <button
             onClick={() => loadPatients()}
             title="Refresh Triage Queue"
-            className="p-2 rounded-full border border-line bg-surface hover:bg-paper text-ink-soft hover:text-ink transition-colors"
+            className="triage-icon-btn"
+            aria-label="Refresh Roster"
           >
             <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* Loading state */}
+      {/* ── Interactive Tier Summary Metric Strip ────────────────── */}
+      <div className="tier-summary-strip dash-enter dash-enter--d1">
+        {/* Critical */}
+        <div
+          onClick={() => toggleTierFilter('critical')}
+          className={`tier-summary-card tier-summary-card--critical ${tierFilter === 'critical' ? 'tier-summary-card--active' : ''}`}
+          role="button"
+          tabIndex={0}
+          title="Filter critical patients"
+        >
+          <div className="tier-summary-card__icon" style={{ background: 'rgba(166, 66, 59, 0.12)', color: '#A6423B' }}>
+            <PhoneCall size={18} />
+          </div>
+          <div>
+            <div className="tier-summary-card__count" style={{ color: '#A6423B' }}>
+              {tierCounts.critical}
+            </div>
+            <div className="tier-summary-card__label" style={{ color: '#A6423B' }}>
+              Critical
+            </div>
+          </div>
+        </div>
+
+        {/* High Risk */}
+        <div
+          onClick={() => toggleTierFilter('high')}
+          className={`tier-summary-card tier-summary-card--high ${tierFilter === 'high' ? 'tier-summary-card--active' : ''}`}
+          role="button"
+          tabIndex={0}
+          title="Filter high risk patients"
+        >
+          <div className="tier-summary-card__icon" style={{ background: 'rgba(197, 106, 63, 0.12)', color: '#C56A3F' }}>
+            <AlertOctagon size={18} />
+          </div>
+          <div>
+            <div className="tier-summary-card__count" style={{ color: '#C56A3F' }}>
+              {tierCounts.high}
+            </div>
+            <div className="tier-summary-card__label" style={{ color: '#C56A3F' }}>
+              High Risk
+            </div>
+          </div>
+        </div>
+
+        {/* Moderate */}
+        <div
+          onClick={() => toggleTierFilter('moderate')}
+          className={`tier-summary-card tier-summary-card--moderate ${tierFilter === 'moderate' ? 'tier-summary-card--active' : ''}`}
+          role="button"
+          tabIndex={0}
+          title="Filter moderate risk patients"
+        >
+          <div className="tier-summary-card__icon" style={{ background: 'rgba(184, 134, 58, 0.12)', color: '#B8863A' }}>
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <div className="tier-summary-card__count" style={{ color: '#B8863A' }}>
+              {tierCounts.moderate}
+            </div>
+            <div className="tier-summary-card__label" style={{ color: '#B8863A' }}>
+              Moderate
+            </div>
+          </div>
+        </div>
+
+        {/* Stable */}
+        <div
+          onClick={() => toggleTierFilter('stable')}
+          className={`tier-summary-card tier-summary-card--stable ${tierFilter === 'stable' ? 'tier-summary-card--active' : ''}`}
+          role="button"
+          tabIndex={0}
+          title="Filter stable patients"
+        >
+          <div className="tier-summary-card__icon" style={{ background: 'rgba(29, 111, 100, 0.12)', color: '#1D6F64' }}>
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <div className="tier-summary-card__count" style={{ color: '#1D6F64' }}>
+              {tierCounts.stable}
+            </div>
+            <div className="tier-summary-card__label" style={{ color: '#1D6F64' }}>
+              Stable
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Search & Filter Bar ─────────────────────────────────── */}
+      <div className="doc-filter-bar dash-enter dash-enter--d2">
+        <div className="doc-search-wrap">
+          <Search size={16} />
+          <input
+            type="text"
+            className="doc-search-input"
+            placeholder="Search patients by name, symptoms, or deviation..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-soft hover:text-ink"
+              aria-label="Clear search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+
+        <select
+          className="doc-filter-select"
+          value={tierFilter}
+          onChange={(e) => setTierFilter(e.target.value)}
+          aria-label="Filter by tier"
+        >
+          <option value="all">All Tiers ({patients.length})</option>
+          <option value="critical">Critical ({tierCounts.critical})</option>
+          <option value="high">High Risk ({tierCounts.high})</option>
+          <option value="moderate">Moderate ({tierCounts.moderate})</option>
+          <option value="stable">Stable ({tierCounts.stable})</option>
+          <option value="pending">Pending ({tierCounts.pending})</option>
+        </select>
+
+        <select
+          className="doc-filter-select"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          aria-label="Sort roster"
+        >
+          <option value="severity">Sort: Clinical Severity</option>
+          <option value="score">Sort: Highest Risk Score</option>
+          <option value="name">Sort: Patient Name (A-Z)</option>
+        </select>
+      </div>
+
+      {/* ── Loading Spinner ─────────────────────────────────────── */}
       {isLoading && (
         <div className="py-16 text-center text-ink-soft">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-brand border-t-transparent mb-2" />
+          <div className="dash-spinner" />
           <p className="text-sm">Retrieving assigned patient roster and clinical telemetry...</p>
         </div>
       )}
 
-      {/* Clean Zero-State when no real patients linked */}
+      {/* ── Zero-State when no patients assigned ────────────────── */}
       {!isLoading && patients.length === 0 && (
-        <div className="py-16 px-6 text-center space-y-4 rounded-ritual bg-surface border border-line shadow-ritual max-w-2xl mx-auto">
-          <div className="w-14 h-14 rounded-full bg-brand-light flex items-center justify-center mx-auto text-brand">
+        <div className="doc-zero-state dash-enter dash-enter--d3">
+          <div className="doc-zero-state__icon">
             <Users size={28} />
           </div>
-          <div className="space-y-1.5">
-            <h3 className="text-h2 font-display text-ink">No Patients Assigned Yet</h3>
-            <p className="text-sm text-ink-soft max-w-md mx-auto leading-relaxed">
-              Your physician triage queue is currently clear. When patients register and select your name in their{' '}
-              <strong className="text-ink">Profile &gt; Care Circle</strong>, their live telemetry, automated AI risk scores, and medical records will appear here in real time.
-            </p>
-          </div>
+          <h3 className="doc-zero-state__title">No Patients Assigned Yet</h3>
+          <p className="doc-zero-state__text">
+            Your physician triage queue is currently clear. When patients select your name in their{' '}
+            <strong className="text-ink">Profile &gt; Care Circle</strong>, their live telemetry, automated AI risk scores, and medical records will appear here in real time.
+          </p>
           <button
             onClick={() => loadPatients()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand text-white text-sm font-semibold hover:bg-brand-dark transition-colors shadow-sm"
+            className="triage-action-btn triage-action-btn--primary"
+            style={{ padding: '0.6rem 1.4rem', fontSize: '0.9rem' }}
           >
-            <RefreshCw size={14} />
-            <span>Refresh Roster</span>
+            <RefreshCw size={14} className="inline mr-1.5" />
+            Refresh Roster
           </button>
         </div>
       )}
 
-      {/* Filter and Search Bar for Active Roster */}
-      {!isLoading && patients.length > 0 && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[240px]">
-            <Search
-              size={16}
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none"
-            />
-            <input
-              type="text"
-              className="w-full rounded-clinical border border-line pl-10 pr-4 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-              placeholder="Search patients by name, tier, or symptoms..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          <select
-            className="rounded-clinical border border-line px-3.5 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-            value={tierFilter}
-            onChange={(e) => setTierFilter(e.target.value)}
+      {/* ── Zero Results after filter ───────────────────────────── */}
+      {!isLoading && patients.length > 0 && filteredPatients.length === 0 && (
+        <div className="p-12 text-center rounded-2xl border border-line bg-surface">
+          <ShieldAlert size={36} className="mx-auto text-ink-soft mb-2" />
+          <h3 className="font-display font-bold text-base text-ink">No matching patients</h3>
+          <p className="text-sm text-ink-soft mt-1">
+            No patients match the filter criteria &quot;{tierFilter !== 'all' ? tierFilter : searchQuery}&quot;.
+          </p>
+          <button
+            onClick={() => { setTierFilter('all'); setSearchQuery(''); }}
+            className="mt-3 text-xs font-bold text-brand hover:underline"
           >
-            <option value="all">All Tiers ({patients.length})</option>
-            <option value="critical">Critical</option>
-            <option value="high">High Risk</option>
-            <option value="moderate">Moderate</option>
-            <option value="stable">Stable</option>
-            <option value="pending">Pending</option>
-          </select>
+            Reset all filters
+          </button>
         </div>
       )}
 
-      {/* Clinical Dense Triage Table (rounded-clinical, flat 4px radius) */}
-      {!isLoading && patients.length > 0 && (
-        <div className="rounded-clinical border border-line overflow-x-auto bg-surface shadow-sm">
-          <table className="w-full text-sm text-left">
-          <thead className="bg-paper text-ink-soft uppercase text-xs tracking-wider border-b border-line">
-            <tr>
-              <th className="py-3 px-4 font-semibold">Patient</th>
-              <th className="py-3 px-4 font-semibold">Age / Sex</th>
-              <th className="py-3 px-4 font-semibold">Severity Tier</th>
-              <th className="py-3 px-4 font-semibold">Last Check-In</th>
-              <th className="py-3 px-4 font-semibold">Primary Clinical Indicator</th>
-              <th className="py-3 px-4 font-semibold text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {filteredPatients.map((patient) => {
-              const isExpanded = expandedId === patient.id;
-              return (
-                <Fragment key={patient.id}>
-                  <tr className={`hover:bg-paper/60 transition-colors ${isExpanded ? 'bg-paper/80' : ''}`}>
-                    <td className="py-3 px-4 font-semibold text-ink">{patient.name}</td>
-                    <td className="py-3 px-4 text-ink-soft">
-                      {patient.age}y • {patient.sex}
-                    </td>
-                    <td className="py-3 px-4">
-                      <RiskBadge tier={patient.tier} size="sm" />
-                    </td>
-                    <td className="py-3 px-4 text-ink-soft">{patient.lastCheckInAt}</td>
-                    <td className="py-3 px-4 text-ink max-w-xs truncate" title={patient.keyDeviation}>
-                      {patient.keyDeviation}
-                    </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setExpandedId((id) => (id === patient.id ? null : patient.id))}
-                          className="px-3 py-1 rounded-clinical text-xs font-semibold bg-brand text-white hover:bg-brand-dark transition-colors"
-                        >
-                          {isExpanded ? 'Hide' : 'Review'}
-                        </button>
-                        <button
-                          onClick={() => setActiveModal({ type: 'medicines', patient })}
-                          title="Patient Medicines"
-                          className="p-1 rounded-clinical border border-line hover:bg-paper text-ink-soft hover:text-ink transition-colors"
-                        >
-                          <Pill size={15} />
-                        </button>
-                        <button
-                          onClick={() => setActiveModal({ type: 'reports', patient })}
-                          title="Medical Reports"
-                          className="p-1 rounded-clinical border border-line hover:bg-paper text-ink-soft hover:text-ink transition-colors"
-                        >
-                          <FileText size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+      {/* ── Patient Triage Table ────────────────────────────────── */}
+      {!isLoading && filteredPatients.length > 0 && (
+        <div className="triage-table-wrap dash-enter dash-enter--d3">
+          <table className="triage-table">
+            <thead>
+              <tr>
+                <th style={{ width: '28%' }}>Patient</th>
+                <th style={{ width: '14%' }}>Age / Sex</th>
+                <th style={{ width: '18%' }}>Severity Tier</th>
+                <th style={{ width: '14%' }}>Score</th>
+                <th style={{ width: '16%' }}>Last Check-In</th>
+                <th style={{ width: '10%', textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPatients.map((patient) => {
+                const isExpanded = expandedId === patient.id;
+                const tierKey = (patient.tier || 'stable').toLowerCase();
+                const initials = patient.name
+                  ? patient.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+                  : 'PT';
 
-                  {/* Expanded Dual Explanation & Trajectory Row */}
-                  {isExpanded && (
+                return (
+                  <Fragment key={patient.id}>
                     <tr>
-                      <td colSpan={6} className="p-4 bg-paper border-b border-line">
-                        <div className="max-w-4xl mx-auto space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-h3 font-display text-ink flex items-center gap-2">
-                              <Activity size={18} className="text-brand" />
-                              Clinical Trajectory for {patient.name}
-                            </h3>
-                            <button
-                              onClick={() => setExpandedId(null)}
-                              className="text-xs text-ink-soft hover:text-ink underline"
-                            >
-                              Collapse
-                            </button>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <span className={`triage-row-indicator triage-row-indicator--${tierKey}`} />
+                          <div className="w-8 h-8 rounded-full bg-paper border border-line flex items-center justify-center text-xs font-bold text-ink shrink-0">
+                            {initials}
                           </div>
-
-                          <AssessmentCard
-                            role="doctor"
-                            assessment={patient.assessment}
-                          />
+                          <div>
+                            <div className="font-bold text-ink leading-tight">{patient.name}</div>
+                            {patient.keyDeviation && (
+                              <div className="text-xs text-ink-soft truncate max-w-xs" title={patient.keyDeviation}>
+                                {patient.keyDeviation}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="text-ink-soft text-xs">
+                        {patient.age ? `${patient.age}y` : '—'} • {patient.sex || '—'}
+                      </td>
+                      <td>
+                        <RiskBadge tier={patient.tier} size="sm" />
+                      </td>
+                      <td>
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-paper border border-line text-ink">
+                          {patient.riskScore || 0}/100
+                        </span>
+                      </td>
+                      <td className="text-ink-soft text-xs">
+                        {patient.lastCheckInAt}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setExpandedId((id) => (id === patient.id ? null : patient.id))}
+                            className="triage-action-btn triage-action-btn--primary"
+                            aria-expanded={isExpanded}
+                          >
+                            {isExpanded ? (
+                              <span className="inline-flex items-center gap-1">
+                                Hide <ChevronUp size={13} />
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1">
+                                Review <ChevronDown size={13} />
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => setActiveModal({ type: 'medicines', patient })}
+                            title="Patient Medications"
+                            className="triage-icon-btn"
+                            aria-label={`Medications for ${patient.name}`}
+                          >
+                            <Pill size={15} />
+                          </button>
+                          <button
+                            onClick={() => setActiveModal({ type: 'reports', patient })}
+                            title="Medical Reports"
+                            className="triage-icon-btn"
+                            aria-label={`Medical reports for ${patient.name}`}
+                          >
+                            <FileText size={15} />
+                          </button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+
+                    {/* ── Expanded Clinical Trajectory Row ── */}
+                    {isExpanded && (
+                      <tr className="triage-expanded-row">
+                        <td colSpan={6}>
+                          <div className="max-w-4xl mx-auto space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-bold font-display text-ink flex items-center gap-2">
+                                <Activity size={18} style={{ color: '#1D6F64' }} />
+                                Clinical Trajectory &amp; Telemetry for {patient.name}
+                              </h3>
+                              <button
+                                onClick={() => setExpandedId(null)}
+                                className="text-xs text-ink-soft hover:text-ink font-semibold"
+                              >
+                                Collapse View &times;
+                              </button>
+                            </div>
+
+                            <AssessmentCard
+                              role="doctor"
+                              assessment={patient.assessment || {
+                                overallTier: patient.tier,
+                                overallScore: patient.riskScore,
+                                plainLanguageSummary: patient.keyDeviation || 'No active check-in deviations.',
+                              }}
+                            />
+
+                            <div className="flex items-center justify-between pt-2 border-t border-line text-xs text-ink-soft flex-wrap gap-2">
+                              <span>Patient Clinical ID: <code>{patient.id}</code></span>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setActiveModal({ type: 'medicines', patient })}
+                                  className="text-brand font-bold hover:underline inline-flex items-center gap-1"
+                                >
+                                  <Pill size={13} /> Open Medication Chart
+                                </button>
+                                <span>•</span>
+                                <button
+                                  onClick={() => setActiveModal({ type: 'reports', patient })}
+                                  className="text-brand font-bold hover:underline inline-flex items-center gap-1"
+                                >
+                                  <FileText size={13} /> Review Lab Reports
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {/* Patient Specific Modal for Medicines or Reports */}
+      {/* ── Patient Specific Modal for Medicines or Reports ──────── */}
       {activeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-surface rounded-ritual shadow-ritual border border-line p-6 relative">
+        <div className="doc-modal-overlay" onClick={() => setActiveModal(null)}>
+          <div className="doc-modal-pane" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between pb-3 border-b border-line mb-4">
               <div>
-                <h3 className="text-h2 font-display text-ink">
-                  {activeModal.type === 'medicines' ? 'Medication Inventory' : 'Medical Reports & Records'}
+                <h3 className="font-display font-bold text-lg text-ink">
+                  {activeModal.type === 'medicines' ? 'Medication Inventory & Adherence' : 'Medical Reports & Diagnostic Records'}
                 </h3>
                 <p className="text-xs text-ink-soft">
-                  Viewing records for {activeModal.patient.name} ({activeModal.patient.age}y, {activeModal.patient.sex})
+                  Clinical records for {activeModal.patient.name} ({activeModal.patient.age ? `${activeModal.patient.age}y` : 'Age N/A'}, {activeModal.patient.sex || 'Sex N/A'})
                 </p>
               </div>
               <button
                 onClick={() => setActiveModal(null)}
-                className="p-2 rounded-full hover:bg-paper text-ink-soft hover:text-ink transition-colors"
+                className="triage-icon-btn"
+                aria-label="Close dialog"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 

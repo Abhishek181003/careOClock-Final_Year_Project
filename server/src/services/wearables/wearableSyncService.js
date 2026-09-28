@@ -363,7 +363,7 @@ export async function syncPatientReadings(patientId) {
     }
 
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout querying ${cp.provider} API`)), 4000)
+      setTimeout(() => reject(new Error(`Timeout querying ${cp.provider} API`)), 7000)
     );
 
     const fetchPromise = adapter.fetchLatestReadings({
@@ -396,6 +396,30 @@ export async function syncPatientReadings(patientId) {
     }
   }
 
+  // Update patient body metrics if supplied by wearables (Google Fit / Withings)
+  let metricsUpdated = false;
+  for (const s of successfulReadings) {
+    const cp = patient.connectedProviders.find((p) => p.provider === s.provider);
+    if (cp && s.reading?.deviceInfo) {
+      cp.deviceInfo = { ...(cp.deviceInfo || {}), ...s.reading.deviceInfo };
+      metricsUpdated = true;
+    }
+
+    const norm = s.reading?.normalized;
+    if (norm?.weightKg && (!patient.weightKg || patient.weightKg !== norm.weightKg)) {
+      patient.weightKg = norm.weightKg;
+      metricsUpdated = true;
+    }
+    if (norm?.heightCm && (!patient.heightCm || patient.heightCm !== norm.heightCm)) {
+      patient.heightCm = norm.heightCm;
+      metricsUpdated = true;
+    }
+  }
+  if (metricsUpdated) {
+    await patient.save();
+    console.log(`[WEARABLE-SYNC] Updated patient metrics: Weight ${patient.weightKg} kg, Height ${patient.heightCm} cm`);
+  }
+
   // ── Multi-Device Merge Engine & Disagreement Detection ──────────────────────
   const mergedVitals = {
     systolicBp: null,
@@ -424,6 +448,9 @@ export async function syncPatientReadings(patientId) {
 
     for (const [vitalKey, value] of Object.entries(norm)) {
       if (value !== null && value !== undefined && !isNaN(value)) {
+        if (!collectedReadingsByVital[vitalKey]) {
+          collectedReadingsByVital[vitalKey] = [];
+        }
         collectedReadingsByVital[vitalKey].push({
           provider,
           value,
@@ -441,20 +468,27 @@ export async function syncPatientReadings(patientId) {
   // 5. respirationRate -> Oura (1) > Google Health (2)
 
   const priorityOrder = {
-    systolicBp: ['withings'],
-    diastolicBp: ['withings'],
-    heartRate: ['withings', 'oura', 'google_health'],
-    spo2: ['withings', 'oura', 'google_health'],
-    temperatureC: ['oura'],
-    respirationRate: ['oura', 'google_health'],
+    systolicBp: ['withings', 'google_health'],
+    diastolicBp: ['withings', 'google_health'],
+    heartRate: ['withings', 'google_health', 'oura'],
+    spo2: ['google_health', 'withings', 'oura'],
+    temperatureC: ['oura', 'google_health'],
+    respirationRate: ['google_health', 'oura'],
   };
 
   for (const [vitalKey, candidates] of Object.entries(collectedReadingsByVital)) {
     if (candidates.length === 0) continue;
 
     const ranking = priorityOrder[vitalKey] || [];
-    // Sort candidates according to ranking
+    // Sort candidates:
+    // 1. Prioritize authentic direct measurements over calibrated baselines
+    // 2. Fall back to priority ranking
     candidates.sort((a, b) => {
+      const isRealA = !a.metadata?.isEstimated && a.metadata?.measurementMethod !== 'calibrated_bpm_connect';
+      const isRealB = !b.metadata?.isEstimated && b.metadata?.measurementMethod !== 'calibrated_bpm_connect';
+      if (isRealA && !isRealB) return -1;
+      if (!isRealA && isRealB) return 1;
+
       const rankA = ranking.indexOf(a.provider);
       const rankB = ranking.indexOf(b.provider);
       const posA = rankA === -1 ? 999 : rankA;
@@ -472,7 +506,7 @@ export async function syncPatientReadings(patientId) {
   const vitalDisagreements = [];
 
   // Heart Rate Disagreement Check
-  if (collectedReadingsByVital.heartRate.length >= 2) {
+  if (collectedReadingsByVital.heartRate?.length >= 2) {
     const readings = collectedReadingsByVital.heartRate;
     const hrValues = readings.map((r) => r.value);
     const maxHr = Math.max(...hrValues);
@@ -490,7 +524,7 @@ export async function syncPatientReadings(patientId) {
   }
 
   // SpO2 Disagreement Check
-  if (collectedReadingsByVital.spo2.length >= 2) {
+  if (collectedReadingsByVital.spo2?.length >= 2) {
     const readings = collectedReadingsByVital.spo2;
     const spo2Values = readings.map((r) => r.value);
     const maxSpO2 = Math.max(...spo2Values);
@@ -531,6 +565,15 @@ export async function syncPatientReadings(patientId) {
     isDemoReading,
     connectedCount: activeProviders.length,
     providers: activeProviders.map((cp) => cp.provider),
+    bodyMetrics: {
+      weightKg: patient.weightKg || null,
+      heightCm: patient.heightCm || null,
+    },
+    deviceReadings: successfulReadings.map((s) => ({
+      provider: s.provider,
+      deviceInfo: s.reading?.deviceInfo,
+      normalized: s.reading?.normalized,
+    })),
     errors: providerErrors.length > 0 ? providerErrors : undefined,
     timestamp: new Date().toISOString(),
     message:

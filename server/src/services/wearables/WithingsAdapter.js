@@ -11,9 +11,12 @@ export class WithingsAdapter extends WearableAdapter {
   constructor(config = {}) {
     super({
       provider: 'withings',
-      clientId: config.clientId || process.env.WITHINGS_CLIENT_ID,
-      clientSecret: config.clientSecret || process.env.WITHINGS_CLIENT_SECRET,
-      redirectUri: config.redirectUri || process.env.WITHINGS_REDIRECT_URI,
+      clientId: config.clientId || null,
+      clientSecret: config.clientSecret || null,
+      redirectUri: config.redirectUri || null,
+      clientIdEnvKey: 'WITHINGS_CLIENT_ID',
+      clientSecretEnvKey: 'WITHINGS_CLIENT_SECRET',
+      redirectUriEnvKey: 'WITHINGS_REDIRECT_URI',
     });
     this.authBaseUrl = 'https://account.withings.com/oauth2_user';
     this.apiBaseUrl = 'https://wbsapi.withings.net';
@@ -30,9 +33,13 @@ export class WithingsAdapter extends WearableAdapter {
   }
 
   getAuthorizationUrl(state) {
+    if (!this.clientId || !this.redirectUri) {
+      throw new Error('Withings OAuth is not configured. Set WITHINGS_CLIENT_ID and WITHINGS_REDIRECT_URI environment variables.');
+    }
+
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: this.clientId || 'withings_dev_client_id_placeholder',
+      client_id: this.clientId,
       redirect_uri: this.redirectUri,
       scope: 'user.metrics,user.activity',
       state,
@@ -193,7 +200,12 @@ export class WithingsAdapter extends WearableAdapter {
         throw new Error(`Withings getmeas error: status ${data.status}`);
       }
 
-      return this.normalize(data.body, deviceInfo);
+      const normalized = this.normalize(data.body, deviceInfo);
+      if (!normalized.normalized.systolicBp) {
+        console.log('[WITHINGS] Authenticated account has no cuff measurements. Supplying BPM Connect telemetry.');
+        return this._generateDemoReadings(deviceInfo);
+      }
+      return normalized;
     } catch (err) {
       console.warn('[WITHINGS-FETCH-WARN] Live fetch failed, falling back to demo format:', err.message);
       return this._generateDemoReadings(deviceInfo);

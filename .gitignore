@@ -69,3 +69,9 @@ Frontend_Design_Templates/
 ai-files-detail.md
 doc/
 
+# Internal verification, diagnostic & benchmark scratch files
+ai-engine/verification/
+ai-engine/benchmarks/results/backup_before_repeat/
+ai-engine/benchmarks/results/*_run*.json
+ai-engine/benchmarks/results/*_run*.csv
+

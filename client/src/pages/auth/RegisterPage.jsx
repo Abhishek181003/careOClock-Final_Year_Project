@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  UserCheck, Stethoscope, Users, ShieldCheck,
+  AlertCircle, Lock, HeartPulse, UserPlus,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
 import { CONFIG } from '../../config';
+import './AuthPages.css';
 
 const ROLES = [
-  { value: 'patient', label: 'Patient (Self-check-in)' },
-  { value: 'caregiver', label: 'Family Member or Caregiver' },
-  { value: 'doctor', label: 'Doctor / Physician' },
+  { value: 'patient', label: 'Patient', sub: 'Self check-in', icon: UserCheck },
+  { value: 'doctor', label: 'Doctor', sub: 'Physician', icon: Stethoscope },
+  { value: 'caregiver', label: 'Caregiver', sub: 'Family member', icon: Users },
 ];
 
 export default function RegisterPage() {
@@ -83,169 +88,280 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-paper px-4 py-12 text-ink">
-      <div className="w-full max-w-md bg-surface rounded-ritual shadow-ritual p-8 border border-line">
-        <div className="text-center mb-6">
-          <Link to="/" className="inline-block font-display font-extrabold text-h2 text-brand">
-            {CONFIG.BRAND_NAME}
-          </Link>
-          <p className="text-sm text-ink-soft mt-1">Join the daily care ritual</p>
-        </div>
-
-        <h1 className="text-h2 font-display text-ink mb-6 text-center">Create account</h1>
-
-        <fieldset className="mb-5 p-3 rounded-xl bg-paper border border-line">
-          <legend className="text-xs font-semibold uppercase tracking-wider text-ink-soft px-1">
-            Account Role
-          </legend>
-          <div className="space-y-2 mt-1.5">
-            {ROLES.map((r) => (
-              <label
-                key={r.value}
-                className={`flex items-center gap-2.5 p-2 rounded-lg cursor-pointer text-sm font-medium transition-colors ${
-                  role === r.value ? 'bg-brand-light/50 text-brand-dark' : 'text-ink hover:bg-surface'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value={r.value}
-                  checked={role === r.value}
-                  onChange={() => setRole(r.value)}
-                  className="accent-brand"
-                />
-                {r.label}
-              </label>
-            ))}
+    <div className="auth-page">
+      {/* ── Left: Visual Panel ─────────────────────────────── */}
+      <div className="auth-panel-visual">
+        <div
+          className="auth-panel-visual__bg"
+          style={{ backgroundImage: "url('/assets/images/family-care.jpg')" }}
+        />
+        <div className="auth-panel-visual__overlay" />
+        <div className="auth-panel-visual__content">
+          <div className="auth-panel-visual__badge">
+            <span className="auth-panel-visual__badge-dot" />
+            Join the Care Community
           </div>
-        </fieldset>
+          <h2 className="auth-panel-visual__title">
+            Start your <em>care ritual</em><br />
+            in minutes.
+          </h2>
+          <p className="auth-panel-visual__subtitle">
+            Whether you&apos;re a patient tracking your own health, a family
+            member staying connected, or a physician monitoring your panel —
+            CareOClock brings everyone together.
+          </p>
+          <div className="auth-panel-visual__stats">
+            <div className="auth-panel-visual__stat">
+              <span className="auth-panel-visual__stat-value">3</span>
+              <span className="auth-panel-visual__stat-label">Roles supported</span>
+            </div>
+            <div className="auth-panel-visual__stat">
+              <span className="auth-panel-visual__stat-value">30s</span>
+              <span className="auth-panel-visual__stat-label">To sign up</span>
+            </div>
+            <div className="auth-panel-visual__stat">
+              <span className="auth-panel-visual__stat-value">Free</span>
+              <span className="auth-panel-visual__stat-label">Forever</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Field
-            label="Full Name"
-            value={form.displayName}
-            onChange={set('displayName')}
-            placeholder="Arthur Pendelton"
-            required
-          />
-          <Field
-            label="Email Address"
-            type="email"
-            value={form.email}
-            onChange={set('email')}
-            placeholder="name@example.com"
-            required
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={form.password}
-            onChange={set('password')}
-            placeholder="At least 6 characters"
-            required
-          />
+      {/* ── Right: Form Panel ─────────────────────────────── */}
+      <div className="auth-panel-form">
+        <div className="auth-form-container">
+          {/* Brand */}
+          <div className="auth-brand auth-animate">
+            <Link to="/" className="auth-brand__link">
+              Care<span className="brand-o">O</span>Clock
+            </Link>
+            <p className="auth-brand__tagline">Join the daily care ritual</p>
+          </div>
 
-          {role === 'patient' && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field
-                label="Age"
-                type="number"
-                value={form.age}
-                onChange={set('age')}
-                min="18"
-                max="120"
-                required
-              />
-              <label className="block text-sm">
-                <span className="block mb-1.5 font-medium text-ink">Biological Sex</span>
-                <select
-                  className="w-full rounded-lg border border-line px-3 py-2.5 text-base bg-paper text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-                  value={form.sex}
-                  onChange={set('sex')}
+          {/* Title */}
+          <h1 className="auth-title auth-animate auth-animate--d1">Create your account</h1>
+          <p className="auth-title-sub auth-animate auth-animate--d1">
+            Choose your role to get started
+          </p>
+
+          {/* Role Selector */}
+          <fieldset className="auth-role-selector auth-animate auth-animate--d2">
+            <legend className="auth-role-selector__legend">
+              <UserPlus size={13} />
+              I am a…
+            </legend>
+            <div className="auth-role-selector__options">
+              {ROLES.map((r) => (
+                <label
+                  key={r.value}
+                  className={`auth-role-option ${role === r.value ? 'auth-role-option--active' : ''}`}
                 >
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
+                  <input
+                    type="radio"
+                    name="role"
+                    value={r.value}
+                    checked={role === r.value}
+                    onChange={() => setRole(r.value)}
+                  />
+                  <span className="auth-role-option__icon">
+                    <r.icon size={16} />
+                  </span>
+                  <span className="auth-role-option__label">
+                    {r.label}
+                    <br />
+                    <span style={{ fontWeight: 400, fontSize: '0.68rem', color: '#4B5A57' }}>
+                      {r.sub}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="auth-form auth-animate auth-animate--d3">
+            {/* Full Name */}
+            <div className="auth-field">
+              <label className="auth-field__label" htmlFor="reg-name">
+                Full Name
               </label>
+              <input
+                id="reg-name"
+                type="text"
+                required
+                className="auth-field__input"
+                value={form.displayName}
+                onChange={set('displayName')}
+                placeholder="Arthur Pendelton"
+              />
             </div>
-          )}
 
-          {role === 'patient' && doctors.length > 0 && (
-            <label className="block text-sm">
-              <span className="block mb-1.5 font-medium text-ink">
-                Primary Care Physician <span className="text-xs text-ink-soft font-normal">(Optional — can connect later)</span>
-              </span>
-              <select
-                className="w-full rounded-lg border border-line px-3 py-2.5 text-base bg-paper text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-                value={form.assignedDoctorId}
-                onChange={set('assignedDoctorId')}
-              >
-                <option value="">-- Connect with doctor later --</option>
-                {doctors.map((doc) => (
-                  <option key={doc._id || doc.id} value={doc._id || doc.id}>
-                    {doc.displayName || doc.name} ({doc.email})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+            {/* Email */}
+            <div className="auth-field">
+              <label className="auth-field__label" htmlFor="reg-email">
+                Email Address
+              </label>
+              <input
+                id="reg-email"
+                type="email"
+                required
+                className="auth-field__input"
+                value={form.email}
+                onChange={set('email')}
+                placeholder="name@example.com"
+              />
+            </div>
 
-          {role === 'doctor' && (
-            <Field
-              label="Doctor Invite / Credential Code"
-              value={form.doctorInviteCode}
-              onChange={set('doctorInviteCode')}
-              required
-            />
-          )}
+            {/* Password */}
+            <div className="auth-field">
+              <label className="auth-field__label" htmlFor="reg-password">
+                Password
+              </label>
+              <input
+                id="reg-password"
+                type="password"
+                required
+                className="auth-field__input"
+                value={form.password}
+                onChange={set('password')}
+                placeholder="At least 6 characters"
+              />
+            </div>
 
-          {role === 'caregiver' && (
-            <Field
-              label="Patient Link / Invite Code (Optional)"
-              value={form.inviteCode}
-              onChange={set('inviteCode')}
-              placeholder="Enter patient invite code if available (or connect later)"
-            />
-          )}
+            {/* Patient-specific: Age + Sex */}
+            {role === 'patient' && (
+              <div className="auth-field-row">
+                <div className="auth-field">
+                  <label className="auth-field__label" htmlFor="reg-age">
+                    Age
+                  </label>
+                  <input
+                    id="reg-age"
+                    type="number"
+                    required
+                    min="18"
+                    max="120"
+                    className="auth-field__input"
+                    value={form.age}
+                    onChange={set('age')}
+                  />
+                </div>
+                <div className="auth-field">
+                  <label className="auth-field__label" htmlFor="reg-sex">
+                    Biological Sex
+                  </label>
+                  <select
+                    id="reg-sex"
+                    className="auth-field__select"
+                    value={form.sex}
+                    onChange={set('sex')}
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
-          {error && (
-            <div
-              role="alert"
-              className="p-3 rounded-lg bg-tier-critical/10 border border-tier-critical/30 text-tier-critical text-sm font-medium"
+            {/* Patient-specific: Primary Care Physician */}
+            {role === 'patient' && doctors.length > 0 && (
+              <div className="auth-field">
+                <label className="auth-field__label" htmlFor="reg-doctor">
+                  Primary Care Physician{' '}
+                  <span className="optional-hint">(Optional — can connect later)</span>
+                </label>
+                <select
+                  id="reg-doctor"
+                  className="auth-field__select"
+                  value={form.assignedDoctorId}
+                  onChange={set('assignedDoctorId')}
+                >
+                  <option value="">— Connect with doctor later —</option>
+                  {doctors.map((doc) => (
+                    <option key={doc._id || doc.id} value={doc._id || doc.id}>
+                      {doc.displayName || doc.name} ({doc.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Doctor-specific: Invite Code */}
+            {role === 'doctor' && (
+              <div className="auth-field">
+                <label className="auth-field__label" htmlFor="reg-doc-code">
+                  Doctor Invite / Credential Code
+                </label>
+                <input
+                  id="reg-doc-code"
+                  type="text"
+                  required
+                  className="auth-field__input"
+                  value={form.doctorInviteCode}
+                  onChange={set('doctorInviteCode')}
+                />
+              </div>
+            )}
+
+            {/* Caregiver-specific: Patient Link Code */}
+            {role === 'caregiver' && (
+              <div className="auth-field">
+                <label className="auth-field__label" htmlFor="reg-invite">
+                  Patient Link / Invite Code{' '}
+                  <span className="optional-hint">(Optional)</span>
+                </label>
+                <input
+                  id="reg-invite"
+                  type="text"
+                  className="auth-field__input"
+                  value={form.inviteCode}
+                  onChange={set('inviteCode')}
+                  placeholder="Enter patient invite code if available"
+                />
+              </div>
+            )}
+
+            {/* Error */}
+            {error && (
+              <div role="alert" className="auth-error">
+                <AlertCircle size={16} className="auth-error__icon" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={`auth-submit-btn ${isSubmitting ? 'auth-submit-btn--loading' : ''}`}
             >
-              {error}
-            </div>
-          )}
+              {isSubmitting ? 'Creating account...' : 'Create account'}
+            </button>
+          </form>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-brand hover:bg-brand-dark text-white font-display font-semibold rounded-full px-4 py-3 text-base transition-colors shadow-sm disabled:opacity-50 mt-2"
-          >
-            {isSubmitting ? 'Creating account...' : 'Create account'}
-          </button>
-        </form>
+          {/* Footer */}
+          <div className="auth-footer auth-animate auth-animate--d5">
+            Already have an account?{' '}
+            <Link to="/login" className="auth-footer__link">
+              Sign in
+            </Link>
+          </div>
 
-        <div className="mt-6 pt-5 border-t border-line text-center text-sm text-ink-soft">
-          Already have an account?{' '}
-          <Link to="/login" className="text-brand font-semibold underline hover:text-brand-dark">
-            Log in
-          </Link>
+          {/* Trust badges */}
+          <div className="auth-trust auth-animate auth-animate--d6">
+            <span className="auth-trust__item">
+              <Lock size={13} /> End-to-end encrypted
+            </span>
+            <span className="auth-trust__item">
+              <ShieldCheck size={13} /> HIPAA-ready
+            </span>
+            <span className="auth-trust__item">
+              <HeartPulse size={13} /> AI-powered insights
+            </span>
+          </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function Field({ label, ...inputProps }) {
-  return (
-    <label className="block text-sm">
-      <span className="block mb-1.5 font-medium text-ink">{label}</span>
-      <input
-        className="w-full rounded-lg border border-line px-3.5 py-2.5 text-base bg-paper text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-        {...inputProps}
-      />
-    </label>
   );
 }

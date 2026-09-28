@@ -51,13 +51,16 @@ before(async () => {
     Prediction.syncIndexes(),
   ]);
 
-  // Clean test data
-  await User.deleteMany({ email: { $regex: /@phase6-test\.com$/ } });
-  await Patient.deleteMany({});
-  await CaregiverLink.deleteMany({});
-  await AuditLog.deleteMany({});
-  await Vitals.deleteMany({});
-  await Prediction.deleteMany({});
+  // Clean test data (scoped strictly to test users)
+  const existingTestUsers = await User.find({ email: { $regex: /@phase6-test\.com$/ } });
+  const testUserIds = existingTestUsers.map((u) => u._id);
+  const existingTestPatients = await Patient.find({ userId: { $in: testUserIds } });
+  const testPatientIds = existingTestPatients.map((p) => p._id);
+  await Patient.deleteMany({ _id: { $in: testPatientIds } });
+  await CaregiverLink.deleteMany({ caregiverUserId: { $in: testUserIds } });
+  await Vitals.deleteMany({ patientId: { $in: testPatientIds } });
+  await Prediction.deleteMany({ patientId: { $in: testPatientIds } });
+  await User.deleteMany({ _id: { $in: testUserIds } });
 
   // 1. Create primary Doctor
   const docRes = await request(app).post('/api/auth/register').send({
@@ -148,12 +151,15 @@ before(async () => {
 });
 
 after(async () => {
-  await User.deleteMany({ email: { $regex: /@phase6-test\.com$/ } });
-  await Patient.deleteMany({});
-  await CaregiverLink.deleteMany({});
-  await AuditLog.deleteMany({});
-  await Vitals.deleteMany({});
-  await Prediction.deleteMany({});
+  const existingTestUsers = await User.find({ email: { $regex: /@phase6-test\.com$/ } });
+  const testUserIds = existingTestUsers.map((u) => u._id);
+  const existingTestPatients = await Patient.find({ userId: { $in: testUserIds } });
+  const testPatientIds = existingTestPatients.map((p) => p._id);
+  await Patient.deleteMany({ _id: { $in: testPatientIds } });
+  await CaregiverLink.deleteMany({ caregiverUserId: { $in: testUserIds } });
+  await Vitals.deleteMany({ patientId: { $in: testPatientIds } });
+  await Prediction.deleteMany({ patientId: { $in: testPatientIds } });
+  await User.deleteMany({ _id: { $in: testUserIds } });
   await mongoose.disconnect();
 });
 

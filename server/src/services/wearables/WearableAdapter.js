@@ -9,9 +9,29 @@
 export class WearableAdapter {
   constructor(config = {}) {
     this.provider = config.provider || 'unknown';
-    this.clientId = config.clientId || null;
-    this.clientSecret = config.clientSecret || null;
-    this.redirectUri = config.redirectUri || null;
+    // Store explicit overrides if provided (e.g. from tests)
+    this._clientIdOverride = config.clientId || null;
+    this._clientSecretOverride = config.clientSecret || null;
+    this._redirectUriOverride = config.redirectUri || null;
+    // Store env var key names for lazy resolution (avoids ESM import hoisting race)
+    this._clientIdEnvKey = config.clientIdEnvKey || null;
+    this._clientSecretEnvKey = config.clientSecretEnvKey || null;
+    this._redirectUriEnvKey = config.redirectUriEnvKey || null;
+  }
+
+  /** Lazily resolve clientId from override or process.env */
+  get clientId() {
+    return this._clientIdOverride || (this._clientIdEnvKey ? process.env[this._clientIdEnvKey] : null) || null;
+  }
+
+  /** Lazily resolve clientSecret from override or process.env */
+  get clientSecret() {
+    return this._clientSecretOverride || (this._clientSecretEnvKey ? process.env[this._clientSecretEnvKey] : null) || null;
+  }
+
+  /** Lazily resolve redirectUri from override or process.env */
+  get redirectUri() {
+    return this._redirectUriOverride || (this._redirectUriEnvKey ? process.env[this._redirectUriEnvKey] : null) || null;
   }
 
   /**

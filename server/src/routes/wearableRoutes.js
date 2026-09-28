@@ -193,4 +193,68 @@ router.get('/latest-readings', authenticateToken, requireRole(['patient', 'docto
   }
 });
 
+// ── 7. GET /api/wearables/google_health/debug-sources (Dev-only diagnostic) ──
+router.get('/google_health/debug-sources', authenticateToken, requireRole(['patient']), async (req, res, next) => {
+  try {
+    const patient = await Patient.findOne({ userId: req.user.id });
+    if (!patient) return res.status(404).json({ error: 'Patient not found' });
+
+    const ghProvider = (patient.connectedProviders || []).find(p => p.provider === 'google_health');
+    if (!ghProvider) return res.status(400).json({ error: 'Google Health not connected' });
+
+    const { decryptToken } = await import('../utils/tokenEncryption.js');
+    const accessToken = decryptToken(ghProvider.accessToken);
+
+    const apiBase = 'https://fitness.googleapis.com/fitness/v1/users/me';
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    // List all data sources
+    const sourcesRes = await fetch(`${apiBase}/dataSources`, { headers });
+    if (!sourcesRes.ok) {
+      return res.status(502).json({ error: `Google API returned ${sourcesRes.status}`, body: await sourcesRes.text() });
+    }
+    const sourcesData = await sourcesRes.json();
+    const allSources = (sourcesData.dataSource || []).map(ds => ({
+      dataType: ds.dataType?.name,
+      streamId: ds.dataStreamId,
+      app: ds.application?.packageName || 'N/A',
+      device: ds.device?.model || 'N/A',
+    }));
+
+    // Query each source for data in last 24h
+    const nowNanos = Date.now() * 1000000;
+    const lookbackNanos = (Date.now() - 86400000) * 1000000;
+
+    const sourcesWithData = [];
+    for (const ds of sourcesData.dataSource || []) {
+      try {
+        const endpoint = `${apiBase}/dataSources/${encodeURIComponent(ds.dataStreamId)}/datasets/${lookbackNanos}-${nowNanos}`;
+        const dsRes = await fetch(endpoint, { headers });
+        if (dsRes.ok) {
+          const dsData = await dsRes.json();
+          if (dsData?.point?.length > 0) {
+            sourcesWithData.push({
+              dataType: ds.dataType?.name,
+              streamId: ds.dataStreamId,
+              app: ds.application?.packageName || 'N/A',
+              pointCount: dsData.point.length,
+              latestPoint: dsData.point[dsData.point.length - 1],
+            });
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    return res.status(200).json({
+      totalSources: allSources.length,
+      allSources,
+      sourcesWithDataLast24h: sourcesWithData,
+      isDemoMode: ghProvider.isDemoMode,
+      tokenExpiresAt: ghProvider.tokenExpiresAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

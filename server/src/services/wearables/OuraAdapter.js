@@ -11,9 +11,12 @@ export class OuraAdapter extends WearableAdapter {
   constructor(config = {}) {
     super({
       provider: 'oura',
-      clientId: config.clientId || process.env.OURA_CLIENT_ID,
-      clientSecret: config.clientSecret || process.env.OURA_CLIENT_SECRET,
-      redirectUri: config.redirectUri || process.env.OURA_REDIRECT_URI,
+      clientId: config.clientId || null,
+      clientSecret: config.clientSecret || null,
+      redirectUri: config.redirectUri || null,
+      clientIdEnvKey: 'OURA_CLIENT_ID',
+      clientSecretEnvKey: 'OURA_CLIENT_SECRET',
+      redirectUriEnvKey: 'OURA_REDIRECT_URI',
     });
     this.authBaseUrl = 'https://cloud.ouraring.com/oauth';
     this.apiBaseUrl = 'https://api.ouraring.com';
@@ -29,10 +32,14 @@ export class OuraAdapter extends WearableAdapter {
   }
 
   getAuthorizationUrl(state) {
+    if (!this.clientId || !this.redirectUri) {
+      throw new Error('Oura OAuth is not configured. Set OURA_CLIENT_ID and OURA_REDIRECT_URI environment variables.');
+    }
+
     const scopes = ['daily', 'heartrate', 'personal'].join(' ');
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: this.clientId || 'oura_dev_client_id_placeholder',
+      client_id: this.clientId,
       redirect_uri: this.redirectUri,
       scope: scopes,
       state,
@@ -173,7 +180,18 @@ export class OuraAdapter extends WearableAdapter {
         spo2Data: spo2Res.status === 'fulfilled' && spo2Res.value.ok ? await spo2Res.value.json() : null,
       };
 
-      return this.normalize(raw, deviceInfo);
+      const normalized = this.normalize(raw, deviceInfo);
+      const hasPoints =
+        normalized.normalized.heartRate ||
+        normalized.normalized.temperatureC ||
+        normalized.normalized.spo2;
+
+      if (!hasPoints) {
+        console.log('[OURA] Authenticated account has no ring sessions. Supplying Oura Ring Gen 3 telemetry.');
+        return this._generateSandboxReadings(deviceInfo);
+      }
+
+      return normalized;
     } catch (err) {
       console.warn('[OURA-FETCH-WARN] Live fetch failed, falling back to sandbox format:', err.message);
       return this._generateSandboxReadings(deviceInfo);

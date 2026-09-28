@@ -469,7 +469,7 @@ export default function AppointmentPage() {
                 ))
               ) : (
                 <div className="p-8 text-center text-ink-soft rounded-ritual bg-surface border border-line">
-                  No upcoming visits found. Click "Book New Appointment" to schedule one.
+                  No upcoming visits found. Click &quot;Book New Appointment&quot; to schedule one.
                 </div>
               ))}
 
