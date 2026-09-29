@@ -44,6 +44,30 @@ const prescriptionSchema = new mongoose.Schema(
       maxlength: [500, 'Instructions cannot exceed 500 characters'],
       default: '',
     },
+    status: {
+      type: String,
+      enum: ['proposed', 'accepted', 'rejected', 'discontinued'],
+      default: 'proposed',
+      index: true,
+    },
+    durationDays: {
+      type: Number,
+      default: 0, // 0 = Ongoing / Chronic; >0 = course of N days
+      min: [0, 'Duration cannot be negative'],
+    },
+    clinicalJustification: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Clinical justification cannot exceed 500 characters'],
+      default: '',
+    },
+    acceptedAt: {
+      type: Date,
+    },
+    acceptedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     isActive: {
       type: Boolean,
       default: true,

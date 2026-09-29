@@ -10,9 +10,10 @@ import Vitals from '../models/Vitals.js';
 import Prediction from '../models/Prediction.js';
 import Prescription from '../models/Prescription.js';
 import Alert from '../models/Alert.js';
+import Medicine from '../models/Medicine.js';
 import { evaluateVitals } from '../services/aiEngineService.js';
 import { aggregate } from '../services/aggregatorService.js';
-import { dispatchAlert, acknowledgeAlert } from '../services/alertDispatchService.js';
+import { dispatchAlert, acknowledgeAlert, dismissAlertForUser } from '../services/alertDispatchService.js';
 import { reEvaluatePendingVitals } from '../services/vitalsRecoveryService.js';
 import { calculateAdherence } from '../services/adherenceService.js';
 import { filterPatientCaregiverView, filterDoctorView } from '../schemas/predictionSchema.js';
@@ -140,6 +141,9 @@ const prescriptionSchema = z.object({
   medicationName: z.string().min(2, 'Medication name is required').max(200),
   dose: z.string().min(1, 'Dose is required').max(100),
   schedule: z.array(z.string()).min(1, 'At least one schedule time is required'),
+  instructions: z.string().max(500).optional().default(''),
+  durationDays: z.number().int().min(0).optional().default(0),
+  clinicalJustification: z.string().max(500).optional().default(''),
 });
 
 // ── Route Handlers ──────────────────────────────────────────────────
@@ -358,7 +362,7 @@ router.post('/prescriptions', requireRole(['doctor']), async (req, res) => {
       });
     }
 
-    // Persist prescription to MongoDB (FR6 & FR7)
+    // Persist proposed prescription to MongoDB (FR6 & FR7)
     const prescription = await Prescription.create({
       patientId: patient._id,
       doctorId: req.user.id,
@@ -366,6 +370,9 @@ router.post('/prescriptions', requireRole(['doctor']), async (req, res) => {
       dose: validatedData.dose,
       schedule: validatedData.schedule,
       instructions: validatedData.instructions || '',
+      durationDays: validatedData.durationDays || 0,
+      clinicalJustification: validatedData.clinicalJustification || '',
+      status: 'proposed',
       isActive: true,
     });
 
@@ -379,11 +386,13 @@ router.post('/prescriptions', requireRole(['doctor']), async (req, res) => {
         prescriptionId: prescription._id,
         patientId: patient._id,
         medicationName: validatedData.medicationName,
+        durationDays: validatedData.durationDays,
+        clinicalJustification: validatedData.clinicalJustification,
       },
     });
 
     return res.status(201).json({
-      message: 'Prescription created successfully by doctor',
+      message: 'Prescription proposal created successfully by doctor',
       doctorId: req.user.id,
       patientId: patient._id,
       prescription,
@@ -395,6 +404,136 @@ router.post('/prescriptions', requireRole(['doctor']), async (req, res) => {
         details: error.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
       });
     }
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * PATCH /api/clinical/prescriptions/:prescriptionId/accept
+ * Patient or caregiver accepts a doctor's proposed prescription, activating it into active Medicines
+ */
+router.patch('/prescriptions/:prescriptionId/accept', requireRole(['patient', 'caregiver']), async (req, res) => {
+  try {
+    const { prescriptionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(prescriptionId)) {
+      return res.status(400).json({ error: 'Invalid prescription ID' });
+    }
+
+    const prescription = await Prescription.findById(prescriptionId).populate('doctorId', 'displayName');
+    if (!prescription) {
+      return res.status(404).json({ error: 'Prescription proposal not found' });
+    }
+
+    // Verify ownership
+    let isAuthorized = false;
+    if (req.user.role === 'patient') {
+      const patient = await Patient.findOne({ userId: req.user.id });
+      if (patient && prescription.patientId.toString() === patient._id.toString()) {
+        isAuthorized = true;
+      }
+    } else if (req.user.role === 'caregiver') {
+      const activeLink = await CaregiverLink.findOne({
+        patientId: prescription.patientId,
+        caregiverUserId: req.user.id,
+        status: 'active',
+      });
+      if (activeLink) isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission to accept this prescription.' });
+    }
+
+    prescription.status = 'accepted';
+    prescription.acceptedAt = new Date();
+    prescription.acceptedBy = req.user.id;
+    await prescription.save();
+
+    // Create or activate Medicine entry in schedule
+    const createdMedicine = await Medicine.create({
+      patientId: prescription.patientId,
+      name: prescription.medicationName,
+      dosage: prescription.dose,
+      schedule: prescription.schedule,
+      frequency: 'daily',
+      instructions: prescription.instructions || '',
+      durationDays: prescription.durationDays || 0,
+      clinicalJustification: prescription.clinicalJustification || '',
+      prescribedBy: prescription.doctorId?._id || prescription.doctorId,
+      stockCount: prescription.durationDays > 0 ? prescription.durationDays * (prescription.schedule?.length || 1) : 30,
+      lowStockThreshold: 5,
+      unit: 'tablets',
+      isActive: true,
+      createdBy: req.user.id,
+    });
+
+    await AuditLog.logEvent({
+      action: 'PRESCRIPTION_ACCEPTED',
+      userId: req.user.id,
+      role: req.user.role,
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      details: {
+        prescriptionId: prescription._id,
+        medicineId: createdMedicine._id,
+        patientId: prescription.patientId,
+      },
+    });
+
+    return res.status(200).json({
+      message: 'Prescription proposal accepted and added to daily routine',
+      prescription,
+      medicine: createdMedicine,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * PATCH /api/clinical/prescriptions/:prescriptionId/reject
+ * Patient or caregiver declines a doctor's proposed prescription
+ */
+router.patch('/prescriptions/:prescriptionId/reject', requireRole(['patient', 'caregiver']), async (req, res) => {
+  try {
+    const { prescriptionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(prescriptionId)) {
+      return res.status(400).json({ error: 'Invalid prescription ID' });
+    }
+
+    const prescription = await Prescription.findById(prescriptionId);
+    if (!prescription) {
+      return res.status(404).json({ error: 'Prescription proposal not found' });
+    }
+
+    // Verify authorization
+    let isAuthorized = false;
+    if (req.user.role === 'patient') {
+      const patient = await Patient.findOne({ userId: req.user.id });
+      if (patient && prescription.patientId.toString() === patient._id.toString()) {
+        isAuthorized = true;
+      }
+    } else if (req.user.role === 'caregiver') {
+      const activeLink = await CaregiverLink.findOne({
+        patientId: prescription.patientId,
+        caregiverUserId: req.user.id,
+        status: 'active',
+      });
+      if (activeLink) isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission to decline this prescription.' });
+    }
+
+    prescription.status = 'rejected';
+    await prescription.save();
+
+    return res.status(200).json({
+      message: 'Prescription proposal declined.',
+      prescription,
+    });
+  } catch (error) {
     return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
@@ -412,10 +551,19 @@ router.get('/vitals', requireRole(['patient', 'caregiver', 'doctor']), async (re
       targetPatient = await Patient.findOne({ userId: req.user.id });
     } else if (req.user.role === 'caregiver') {
       // Caregiver can only view vitals for their actively linked patient (FR8)
-      const link = await CaregiverLink.findOne({
-        caregiverUserId: req.user.id,
-        status: 'active',
-      });
+      let link = null;
+      if (req.query.patientId && mongoose.Types.ObjectId.isValid(req.query.patientId)) {
+        link = await CaregiverLink.findOne({
+          caregiverUserId: req.user.id,
+          patientId: req.query.patientId,
+          status: 'active',
+        });
+      } else {
+        link = await CaregiverLink.findOne({
+          caregiverUserId: req.user.id,
+          status: 'active',
+        });
+      }
       if (link) {
         targetPatient = await Patient.findById(link.patientId);
       }
@@ -513,10 +661,19 @@ router.get('/prescriptions', requireRole(['patient', 'doctor', 'caregiver']), as
       const patient = await Patient.findOne({ userId: req.user.id });
       if (patient) targetPatientId = patient._id;
     } else if (req.user.role === 'caregiver') {
-      const link = await CaregiverLink.findOne({
-        caregiverUserId: req.user.id,
-        status: 'active',
-      });
+      let link = null;
+      if (req.query.patientId && mongoose.Types.ObjectId.isValid(req.query.patientId)) {
+        link = await CaregiverLink.findOne({
+          caregiverUserId: req.user.id,
+          patientId: req.query.patientId,
+          status: 'active',
+        });
+      } else {
+        link = await CaregiverLink.findOne({
+          caregiverUserId: req.user.id,
+          status: 'active',
+        });
+      }
       if (link) targetPatientId = link.patientId;
     } else if (req.user.role === 'doctor' && req.query.patientId) {
       if (mongoose.Types.ObjectId.isValid(req.query.patientId)) {
@@ -540,7 +697,9 @@ router.get('/prescriptions', requireRole(['patient', 'doctor', 'caregiver']), as
     const prescriptions = await Prescription.find({
       patientId: targetPatientId,
       isActive: true,
-    }).sort({ prescribedAt: -1 });
+    })
+      .populate('doctorId', 'displayName email')
+      .sort({ prescribedAt: -1 });
 
     return res.status(200).json({
       message: 'Prescriptions retrieved successfully',
@@ -566,6 +725,7 @@ router.get('/patients', requireRole(['doctor']), async (req, res) => {
     const patientList = await Promise.all(
       assignedPatients.map(async (p) => {
         const latestPred = await Prediction.findOne({ patientId: p._id })
+          .populate('vitalsId')
           .sort({ recordedAt: -1 });
 
         const filteredPred = latestPred ? filterDoctorView(latestPred) : null;
@@ -593,7 +753,62 @@ router.get('/patients', requireRole(['doctor']), async (req, res) => {
             }
           }
 
-          const deviations = latestPred?.doctorExplanation?.baselineDeviations || [];
+          const rawDeviations = latestPred?.doctorExplanation?.baselineDeviations || [];
+          const rolling = latestPred?.layer2?.rollingBaseline || {};
+          const vDoc = latestPred?.vitalsId;
+
+          const vitalKeyMap = {
+            heart_rate: { label: 'Heart Rate', unit: 'bpm', vField: 'heartRate' },
+            systolic_bp: { label: 'Systolic Blood Pressure', unit: 'mmHg', vField: 'systolicBp' },
+            diastolic_bp: { label: 'Diastolic Blood Pressure', unit: 'mmHg', vField: 'diastolicBp' },
+            spo2: { label: 'Oxygen Saturation (SpO2)', unit: '%', vField: 'spo2' },
+            temperature_c: { label: 'Body Temperature', unit: '°C', vField: 'temperatureC' },
+            respiration_rate: { label: 'Respiration Rate', unit: 'br/min', vField: 'respirationRate' },
+          };
+
+          let deviationsSource = rawDeviations;
+          if (deviationsSource.length === 0 && latestPred?.layer2?.featureDeviations) {
+            deviationsSource = Object.entries(latestPred.layer2.featureDeviations).map(([vital, z]) => ({
+              vital,
+              zScore: typeof z === 'number' ? z : (z?.z_score || 0),
+            }));
+          }
+
+          const deviations = deviationsSource.map((d) => {
+            const vKey = d.vital || d.featureKey || d.feature || '';
+            const meta = vitalKeyMap[vKey] || { label: vKey.replace(/_/g, ' '), unit: '' };
+            const currentVal =
+              d.currentValue ??
+              d.current ??
+              (vDoc && meta.vField ? vDoc[meta.vField] : null);
+
+            const rBase = rolling[vKey] || {};
+            const meanVal = d.baselineMean ?? rBase.mean ?? null;
+            const stdVal = d.baselineSD ?? d.baseline_std ?? rBase.std ?? null;
+            const z = typeof d.zScore === 'number' ? d.zScore : typeof d.z_score === 'number' ? d.z_score : 0;
+
+            const trend =
+              d.trend ||
+              d.direction ||
+              (z >= 1.0 ? 'elevated' : z <= -1.0 ? 'lower' : 'stable');
+
+            return {
+              feature: meta.label,
+              featureKey: vKey,
+              vital: vKey,
+              current: currentVal != null ? `${currentVal} ${meta.unit}`.trim() : '—',
+              currentValue: currentVal,
+              baselineMean: meanVal != null ? (typeof meanVal === 'number' ? meanVal.toFixed(1) : meanVal) : '—',
+              baselineSD: stdVal != null ? (typeof stdVal === 'number' ? stdVal.toFixed(1) : stdVal) : '—',
+              personalBaseline:
+                meanVal != null && stdVal != null
+                  ? `${typeof meanVal === 'number' ? meanVal.toFixed(1) : meanVal} ± ${typeof stdVal === 'number' ? stdVal.toFixed(1) : stdVal} ${meta.unit}`.trim()
+                  : (d.personalBaseline && d.personalBaseline !== 'Active baseline' ? d.personalBaseline : '—'),
+              zScore: z,
+              trend,
+              unit: meta.unit,
+            };
+          });
 
           assessment = {
             ...filteredPred,
@@ -609,6 +824,12 @@ router.get('/patients', requireRole(['doctor']), async (req, res) => {
           };
         }
 
+        const activeAlert = await Alert.findOne({
+          patientId: p._id,
+          doctorId: req.user.id,
+          status: 'active',
+        }).sort({ createdAt: -1 });
+
         return {
           id: p._id.toString(),
           name: p.userId?.displayName || 'Unnamed Patient',
@@ -622,6 +843,17 @@ router.get('/patients', requireRole(['doctor']), async (req, res) => {
             : 'No check-ins yet',
           keyDeviation: keyDev,
           assessment,
+          activeAlert: activeAlert
+            ? {
+                id: activeAlert._id.toString(),
+                tier: activeAlert.tier,
+                title: activeAlert.title,
+                message: activeAlert.message,
+                createdAt: activeAlert.createdAt,
+                patientCheckedAt: activeAlert.patientCheckedAt,
+                caregiverCheckedAt: activeAlert.caregiverCheckedAt,
+              }
+            : null,
         };
       })
     );
@@ -639,6 +871,7 @@ router.get('/patients', requireRole(['doctor']), async (req, res) => {
 /**
  * GET /api/clinical/alerts
  * Read active clinical deterioration alerts (F-05).
+ * Option 2: Family check-in clears family views, but doctor triage maintains clinical flag.
  * Permitted roles: 'doctor', 'patient', 'caregiver'.
  */
 router.get('/alerts', requireRole(['doctor', 'patient', 'caregiver']), async (req, res) => {
@@ -661,20 +894,35 @@ router.get('/alerts', requireRole(['doctor', 'patient', 'caregiver']), async (re
       }
       query.patientId = patient._id;
       if (status !== 'all') query.status = status;
+      // Option 2: Once patient marks checked, hide from patient
+      query.patientCheckedAt = { $exists: false };
     } else if (req.user.role === 'caregiver') {
-      const link = await CaregiverLink.findOne({
+      const links = await CaregiverLink.find({
         caregiverUserId: req.user.id,
         status: 'active',
       });
-      if (!link) {
+      if (!links || links.length === 0) {
         return res.status(200).json({ message: 'No active patient link found', alerts: [] });
       }
-      query.patientId = link.patientId;
+      if (req.query.patientId && links.some((l) => l.patientId.toString() === req.query.patientId)) {
+        query.patientId = req.query.patientId;
+      } else {
+        query.patientId = { $in: links.map((l) => l.patientId) };
+      }
       if (status !== 'all') query.status = status;
+      // Option 2: Once caregiver marks checked, hide from caregiver
+      query.caregiverCheckedAt = { $exists: false };
     }
 
+    // Exclude alerts dismissed by this specific user
+    query.dismissedByUsers = { $ne: req.user.id };
+
     const alerts = await Alert.find(query)
-      .populate('patientId', 'age sex')
+      .populate({
+        path: 'patientId',
+        select: 'age sex userId',
+        populate: { path: 'userId', select: 'displayName' },
+      })
       .sort({ createdAt: -1 })
       .limit(50);
 
@@ -691,29 +939,109 @@ router.get('/alerts', requireRole(['doctor', 'patient', 'caregiver']), async (re
 
 /**
  * PATCH /api/clinical/alerts/:alertId/acknowledge
- * Doctor acknowledges an active clinical alert.
- * Permitted roles: 'doctor'.
+ * Doctor, patient, or linked caregiver acknowledges an active clinical alert.
+ * Permitted roles: 'doctor', 'patient', 'caregiver'.
  */
-router.patch('/alerts/:alertId/acknowledge', requireRole(['doctor']), async (req, res) => {
+router.patch('/alerts/:alertId/acknowledge', requireRole(['doctor', 'patient', 'caregiver']), async (req, res) => {
   try {
     const { alertId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(alertId)) {
       return res.status(400).json({ error: 'Invalid alertId format.' });
     }
 
+    const alert = await Alert.findById(alertId);
+    if (!alert) {
+      return res.status(404).json({ error: 'Alert not found.' });
+    }
+
+    // Role-based authorization check
+    if (req.user.role === 'doctor') {
+      if (alert.doctorId.toString() !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden: Alert is not assigned to this doctor.' });
+      }
+    } else if (req.user.role === 'patient') {
+      const patient = await Patient.findOne({ userId: req.user.id });
+      if (!patient || alert.patientId.toString() !== patient._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: You can only acknowledge alerts for your own health profile.' });
+      }
+    } else if (req.user.role === 'caregiver') {
+      const link = await CaregiverLink.findOne({
+        caregiverUserId: req.user.id,
+        patientId: alert.patientId,
+        status: 'active',
+      });
+      if (!link) {
+        return res.status(403).json({ error: 'Forbidden: You are not actively linked to this patient.' });
+      }
+    }
+
+    const defaultNotes =
+      req.user.role === 'doctor'
+        ? 'Reviewed and acknowledged by physician'
+        : req.user.role === 'caregiver'
+        ? 'Checked and acknowledged by caregiver'
+        : 'Acknowledged by patient';
+
     const updatedAlert = await acknowledgeAlert({
       alertId,
-      doctorId: req.user.id,
-      resolutionNotes: req.body?.resolutionNotes || '',
+      doctorId: req.user.role === 'doctor' ? req.user.id : null,
+      userId: req.user.id,
+      role: req.user.role,
+      resolutionNotes: req.body?.resolutionNotes || defaultNotes,
     });
-
-    if (!updatedAlert) {
-      return res.status(404).json({ error: 'Alert not found or not assigned to this doctor.' });
-    }
 
     return res.status(200).json({
       message: 'Clinical alert acknowledged successfully',
       alert: updatedAlert,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * PATCH /api/clinical/alerts/:alertId/dismiss
+ * Dismiss an active alert banner for the authenticated user without resolving it globally.
+ * Permitted roles: 'doctor', 'patient', 'caregiver'.
+ */
+router.patch('/alerts/:alertId/dismiss', requireRole(['doctor', 'patient', 'caregiver']), async (req, res) => {
+  try {
+    const { alertId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(alertId)) {
+      return res.status(400).json({ error: 'Invalid alertId format.' });
+    }
+
+    const alert = await Alert.findById(alertId);
+    if (!alert) {
+      return res.status(404).json({ error: 'Alert not found.' });
+    }
+
+    // Role-based authorization check
+    if (req.user.role === 'doctor') {
+      if (alert.doctorId.toString() !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden: Alert is not assigned to this doctor.' });
+      }
+    } else if (req.user.role === 'patient') {
+      const patient = await Patient.findOne({ userId: req.user.id });
+      if (!patient || alert.patientId.toString() !== patient._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: You can only dismiss alerts for your own health profile.' });
+      }
+    } else if (req.user.role === 'caregiver') {
+      const link = await CaregiverLink.findOne({
+        caregiverUserId: req.user.id,
+        patientId: alert.patientId,
+        status: 'active',
+      });
+      if (!link) {
+        return res.status(403).json({ error: 'Forbidden: You are not actively linked to this patient.' });
+      }
+    }
+
+    const updated = await dismissAlertForUser({ alertId, userId: req.user.id });
+
+    return res.status(200).json({
+      message: 'Clinical alert dismissed successfully for user',
+      alert: updated,
     });
   } catch (error) {
     return res.status(500).json({ error: 'Internal server error', message: error.message });

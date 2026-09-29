@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search, Stethoscope, X, Pill, FileText, Activity,
   RefreshCw, Users, AlertOctagon, PhoneCall, AlertTriangle,
@@ -14,13 +15,24 @@ import '../../components/dashboards/Dashboards.css';
 const TIER_RANK = { critical: 0, high: 1, moderate: 2, medium: 2, stable: 3, low: 3, pending: 4 };
 
 export default function DoctorTriage() {
+  const [searchParams] = useSearchParams();
+  const urlPatientId = searchParams.get('patientId');
+
   const [patients, setPatients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [tierFilter, setTierFilter] = useState('all');
   const [sortBy, setSortBy] = useState('severity'); // 'severity' | 'name' | 'score'
-  const [expandedId, setExpandedId] = useState(null);
+  const [expandedId, setExpandedId] = useState(urlPatientId || null);
   const [activeModal, setActiveModal] = useState(null); // { type: 'medicines' | 'reports', patient: object }
+
+  // Auto-expand patient if directed from clinical alert
+  useEffect(() => {
+    if (urlPatientId) {
+      setExpandedId(urlPatientId);
+      setTierFilter('all');
+    }
+  }, [urlPatientId]);
 
   // Load assigned patients from backend
   const loadPatients = useCallback(async () => {
@@ -38,6 +50,11 @@ export default function DoctorTriage() {
 
   useEffect(() => {
     loadPatients();
+
+    // Auto-refresh when careoclock refresh event fires
+    const onRefresh = () => loadPatients();
+    window.addEventListener('careoclock:refresh', onRefresh);
+    return () => window.removeEventListener('careoclock:refresh', onRefresh);
   }, [loadPatients]);
 
   // Counts by tier
@@ -91,6 +108,24 @@ export default function DoctorTriage() {
 
   const toggleTierFilter = (tier) => {
     setTierFilter((prev) => (prev === tier ? 'all' : tier));
+  };
+
+  const [isSigningOff, setIsSigningOff] = useState(false);
+
+  const handleDoctorSignOff = async (alertId) => {
+    if (!alertId || isSigningOff) return;
+    try {
+      setIsSigningOff(true);
+      await api.patch(`/clinical/alerts/${alertId}/acknowledge`, {
+        resolutionNotes: 'Reviewed, confirmed clinically, and resolved by physician',
+      });
+      await loadPatients();
+      window.dispatchEvent(new CustomEvent('careoclock:refresh'));
+    } catch (err) {
+      console.error('Failed to sign off alert:', err);
+    } finally {
+      setIsSigningOff(false);
+    }
   };
 
   return (
@@ -354,7 +389,14 @@ export default function DoctorTriage() {
                         </span>
                       </td>
                       <td className="text-ink-soft text-xs">
-                        {patient.lastCheckInAt}
+                        <div>{patient.lastCheckInAt}</div>
+                        {(patient.lastCheckInAt === 'No check-ins yet' ||
+                          (patient.assessment?.recordedAt &&
+                            new Date().getTime() - new Date(patient.assessment.recordedAt).getTime() > 24 * 3600 * 1000)) && (
+                          <span className="inline-block text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 mt-1">
+                            ⚠️ Check-in Overdue
+                          </span>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div className="flex items-center justify-end gap-1.5">
@@ -411,6 +453,50 @@ export default function DoctorTriage() {
                               </button>
                             </div>
 
+                            {patient.activeAlert && (
+                              <div className="p-4 rounded-ritual bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
+                                <div className="space-y-1">
+                                  <div className="font-bold text-rose-900 flex items-center gap-2 text-sm">
+                                    <AlertOctagon size={16} className="text-rose-600 shrink-0" />
+                                    <span>Active Incident: {patient.activeAlert.title}</span>
+                                    <span className="font-mono text-[11px] bg-rose-200/80 text-rose-900 px-2 py-0.5 rounded uppercase font-bold">
+                                      {patient.activeAlert.tier}
+                                    </span>
+                                  </div>
+                                  <p className="text-rose-800 text-xs">
+                                    {patient.activeAlert.message}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px]">
+                                    <span className="font-semibold text-ink">Family Awareness Status:</span>
+                                    {patient.activeAlert.patientCheckedAt ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-medium">
+                                        <CheckCircle2 size={12} className="text-emerald-700" /> Patient checked ({new Date(patient.activeAlert.patientCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                      </span>
+                                    ) : null}
+                                    {patient.activeAlert.caregiverCheckedAt ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-medium">
+                                        <CheckCircle2 size={12} className="text-emerald-700" /> Caregiver checked ({new Date(patient.activeAlert.caregiverCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                      </span>
+                                    ) : null}
+                                    {!patient.activeAlert.patientCheckedAt && !patient.activeAlert.caregiverCheckedAt && (
+                                      <span className="text-amber-800 bg-amber-100 px-2 py-0.5 rounded font-medium">
+                                        Awaiting family check-in
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => handleDoctorSignOff(patient.activeAlert.id)}
+                                  disabled={isSigningOff}
+                                  className="px-4 py-2 rounded-ritual bg-rose-700 hover:bg-rose-800 text-white font-bold shrink-0 transition-colors shadow-sm flex items-center justify-center gap-1.5 self-start sm:self-auto"
+                                  title="Clinically sign off and resolve this emergency alert"
+                                >
+                                  <CheckCircle2 size={14} />
+                                  <span>{isSigningOff ? 'Signing off...' : 'Sign Off & Resolve Alert'}</span>
+                                </button>
+                              </div>
+                            )}
+
                             <AssessmentCard
                               role="doctor"
                               assessment={patient.assessment || {
@@ -454,35 +540,41 @@ export default function DoctorTriage() {
       {activeModal && (
         <div className="doc-modal-overlay" onClick={() => setActiveModal(null)}>
           <div className="doc-modal-pane" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-3 border-b border-line mb-4">
+            <div className="flex items-start sm:items-center justify-between pb-3 border-b border-line mb-4 shrink-0">
               <div>
                 <h3 className="font-display font-bold text-lg text-ink">
-                  {activeModal.type === 'medicines' ? 'Medication Inventory & Adherence' : 'Medical Reports & Diagnostic Records'}
+                  {activeModal.type === 'medicines'
+                    ? 'Clinical Medication Orders & Adherence'
+                    : 'Medical Reports & Diagnostic Records'}
                 </h3>
                 <p className="text-xs text-ink-soft">
-                  Clinical records for {activeModal.patient.name} ({activeModal.patient.age ? `${activeModal.patient.age}y` : 'Age N/A'}, {activeModal.patient.sex || 'Sex N/A'})
+                  Patient: <strong className="text-ink">{activeModal.patient.name}</strong> (
+                  {activeModal.patient.age ? `${activeModal.patient.age}y` : 'Age N/A'},{' '}
+                  {activeModal.patient.sex || 'Sex N/A'})
                 </p>
               </div>
               <button
                 onClick={() => setActiveModal(null)}
-                className="triage-icon-btn"
+                className="p-1.5 rounded-full hover:bg-paper text-ink-soft hover:text-ink transition-colors"
                 aria-label="Close dialog"
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
-            {activeModal.type === 'medicines' ? (
-              <MedicineManager
-                patientId={activeModal.patient.id}
-                userRole="doctor"
-              />
-            ) : (
-              <ReportManager
-                patientId={activeModal.patient.id}
-                userRole="doctor"
-              />
-            )}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {activeModal.type === 'medicines' ? (
+                <MedicineManager
+                  patientId={activeModal.patient.id}
+                  userRole="doctor"
+                />
+              ) : (
+                <ReportManager
+                  patientId={activeModal.patient.id}
+                  userRole="doctor"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

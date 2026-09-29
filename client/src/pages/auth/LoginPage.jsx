@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ShieldCheck, Lock, AlertCircle, HeartPulse } from 'lucide-react';
+import { ShieldCheck, Lock, AlertCircle, HeartPulse, ShieldAlert, Clock, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './AuthPages.css';
 
@@ -17,26 +17,49 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lockoutNotice, setLockoutNotice] = useState(null); // { title: string, message: string }
+
+  // Check if redirected due to session expiration or security revocation
+  const sessionRevokedNotice = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const reason = params.get('reason');
+    if (reason === 'session_expired') {
+      return 'For your health privacy, your previous session expired due to inactivity. Please sign in again to continue.';
+    }
+    if (reason === 'revoked') {
+      return 'We signed you out to protect your clinical records. Please verify your credentials to continue.';
+    }
+    return null;
+  }, [location.search]);
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     setError('');
-    setIsSubmitting(true);
+    setIsSubmitting(false);
+    setLockoutNotice(null);
+
     try {
+      setIsSubmitting(true);
       const user = await login(form.email, form.password);
       const fallback = HOME_BY_ROLE[user.role] ?? '/';
       navigate(location.state?.from?.pathname ?? fallback, { replace: true });
     } catch (err) {
-      setError(
-        err.response?.data?.error ||
-          "That email and password combination was not recognized. Please check and try again."
-      );
+      const status = err.response?.status;
+      const errorMsg = err.response?.data?.error || 'Authentication error. Please check your credentials.';
+
+      // Critical Alert: Account Locked after Failed Attempts (Modal on Sign-in Screen)
+      if (status === 423 || errorMsg.toLowerCase().includes('locked')) {
+        setLockoutNotice({
+          title: 'Account Temporarily Locked for Security',
+          message: errorMsg,
+        });
+      } else {
+        setError(errorMsg);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
-
-
 
   return (
     <div className="auth-page">
@@ -93,6 +116,17 @@ export default function LoginPage() {
           <p className="auth-title-sub auth-animate auth-animate--d1">
             Sign in to continue your care journey
           </p>
+
+          {/* Security Notice: Forced Sign-out / Session Expiration Banner */}
+          {sessionRevokedNotice && (
+            <div
+              role="alert"
+              className="p-3.5 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 text-xs flex items-start gap-2.5 animate-fade-in"
+            >
+              <Clock size={16} className="text-amber-700 shrink-0 mt-0.5" />
+              <span>{sessionRevokedNotice}</span>
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="auth-form auth-animate auth-animate--d2">
@@ -166,6 +200,60 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Critical Alert: Account Locked after Failed Attempts Modal ────── */}
+      {lockoutNotice && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lockout-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
+        >
+          <div className="w-full max-w-md bg-surface rounded-ritual shadow-2xl border border-rose-300 p-6 space-y-4 animate-scale-up text-ink">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 text-rose-700">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                  <ShieldAlert size={22} className="text-rose-700" />
+                </div>
+                <div>
+                  <h3 id="lockout-modal-title" className="font-display font-bold text-lg text-ink">
+                    {lockoutNotice.title}
+                  </h3>
+                  <span className="text-xs text-rose-600 font-semibold">Brute-Force Guard Activated</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLockoutNotice(null)}
+                className="p-1 rounded-full text-ink-soft hover:bg-paper"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-sm text-ink leading-relaxed">
+              {lockoutNotice.message}
+            </p>
+
+            <div className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1.5">
+              <p className="font-semibold">Why is my account locked?</p>
+              <p className="leading-relaxed">
+                To protect your sensitive medical history and doctor-patient communications from unauthorized guessing, five consecutive incorrect passwords automatically engage a 15-minute security lock.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setLockoutNotice(null)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-full bg-brand hover:bg-brand-dark text-white text-xs font-bold transition-all shadow-sm"
+              >
+                I Understand / Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -124,21 +124,41 @@ export function generateDoctorExplanation({
     }
   }
 
+  const vitalMeta = {
+    heart_rate: { label: 'Heart Rate', unit: 'bpm' },
+    systolic_bp: { label: 'Systolic Blood Pressure', unit: 'mmHg' },
+    diastolic_bp: { label: 'Diastolic Blood Pressure', unit: 'mmHg' },
+    spo2: { label: 'Oxygen Saturation (SpO2)', unit: '%' },
+    temperature_c: { label: 'Body Temperature', unit: '°C' },
+    respiration_rate: { label: 'Respiration Rate', unit: 'br/min' },
+  };
+
   // Format Layer 2 feature deviations ranked by |z| descending
   const baselineDeviations = [];
   if (Array.isArray(layer2?.detailedDeviations) && layer2.detailedDeviations.length > 0) {
     for (const d of layer2.detailedDeviations) {
       const z = typeof d.z_score === 'number' ? d.z_score : 0;
       const absZ = Math.abs(z);
+      const vKey = d.feature;
+      const meta = vitalMeta[vKey] || { label: vKey.replace(/_/g, ' '), unit: '' };
       const meanStr = d.baseline_mean != null ? d.baseline_mean.toFixed(1) : 'N/A';
       const stdStr = d.baseline_std != null ? d.baseline_std.toFixed(1) : 'N/A';
+      const trend = d.direction || (z >= 1.0 ? 'elevated' : z <= -1.0 ? 'lower' : 'stable');
+
       baselineDeviations.push({
-        vital: d.feature,
+        feature: meta.label,
+        featureKey: vKey,
+        vital: vKey,
+        current: d.current_value != null ? `${d.current_value} ${meta.unit}`.trim() : '—',
         currentValue: d.current_value,
+        baselineMean: meanStr,
+        baselineSD: stdStr,
+        personalBaseline: `${meanStr} ± ${stdStr} ${meta.unit}`.trim(),
         zScore: z,
         absZ,
-        personalBaseline: `${meanStr} ± ${stdStr}`,
-        direction: d.direction || (z >= 0 ? 'elevated' : 'depressed'),
+        direction: trend,
+        trend,
+        unit: meta.unit,
         isAnomaly: absZ >= 1.8,
       });
     }
@@ -152,19 +172,32 @@ export function generateDoctorExplanation({
     for (const [vital, data] of sorted) {
       const isObj = typeof data === 'object' && data !== null;
       const zScore = isObj ? data.z_score : data;
-      const absZ = Math.abs(zScore || 0);
+      const z = typeof zScore === 'number' ? zScore : 0;
+      const absZ = Math.abs(z);
+      const meta = vitalMeta[vital] || { label: vital.replace(/_/g, ' '), unit: '' };
       const mean = isObj ? data.mean : layer2.rollingBaseline?.[vital]?.mean;
       const std = isObj ? data.std : layer2.rollingBaseline?.[vital]?.std;
+      const meanStr = mean != null ? (typeof mean === 'number' ? mean.toFixed(1) : mean) : 'N/A';
+      const stdStr = std != null ? (typeof std === 'number' ? std.toFixed(1) : std) : 'N/A';
       const baselineStr =
-        mean != null && std != null ? `${mean.toFixed(1)} ± ${std.toFixed(1)}` : 'Active baseline';
+        mean != null && std != null ? `${meanStr} ± ${stdStr} ${meta.unit}`.trim() : 'Active baseline';
+      const currentVal = isObj ? data.value : undefined;
+      const trend = z >= 1.0 ? 'elevated' : z <= -1.0 ? 'lower' : 'stable';
 
       baselineDeviations.push({
+        feature: meta.label,
+        featureKey: vital,
         vital,
-        currentValue: isObj ? data.value : undefined,
-        zScore: typeof zScore === 'number' ? zScore : 0,
-        absZ,
+        current: currentVal != null ? `${currentVal} ${meta.unit}`.trim() : '—',
+        currentValue: currentVal,
+        baselineMean: meanStr,
+        baselineSD: stdStr,
         personalBaseline: baselineStr,
-        direction: (zScore || 0) >= 0 ? 'elevated' : 'depressed',
+        zScore: z,
+        absZ,
+        direction: trend,
+        trend,
+        unit: meta.unit,
         isAnomaly: absZ >= 1.8,
       });
     }

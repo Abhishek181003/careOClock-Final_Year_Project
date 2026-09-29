@@ -20,6 +20,7 @@ import {
   X,
   Search,
 } from 'lucide-react';
+import ConfirmModal from '../../components/common/ConfirmModal';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
 
@@ -56,6 +57,8 @@ export default function ProfilePage() {
 
   // Edit Baseline Modal state (Patient only)
   const [isEditBaselineModalOpen, setIsEditBaselineModalOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState(null);
+  const [isRevoking, setIsRevoking] = useState(false);
   const [baselineForm, setBaselineForm] = useState({
     age: '',
     sex: 'male',
@@ -173,16 +176,24 @@ export default function ProfilePage() {
     }
   };
 
-  // 4. Revoke Caregiver Link
-  const handleRevokeLink = async (linkId) => {
-    if (!window.confirm('Are you sure you want to disconnect this caregiver?')) return;
+  // 4. Revoke Caregiver Link with ConfirmModal
+  const handleRevokeLink = (linkId) => {
+    setRevokeTarget(linkId);
+  };
+
+  const handleConfirmRevokeLink = async () => {
+    if (!revokeTarget) return;
+    setIsRevoking(true);
     try {
-      await api.post(`/caregiver/revoke/${linkId}`);
+      await api.post(`/caregiver/revoke/${revokeTarget}`);
       const linksRes = await api.get('/caregiver/links');
       setCaregiverLinks(linksRes.data?.links || []);
-      showSuccess('Caregiver link revoked.');
+      setRevokeTarget(null);
+      showSuccess('Caregiver link disconnected successfully.');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to revoke link.');
+    } finally {
+      setIsRevoking(false);
     }
   };
 
@@ -1070,6 +1081,18 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* ── Critical Alert: Irreversible Caregiver Disconnect Modal ──── */}
+      <ConfirmModal
+        isOpen={Boolean(revokeTarget)}
+        title="Disconnect Family Caregiver Access?"
+        message="Are you sure you want to disconnect this caregiver? They will immediately lose access to your daily vitals readings, medication adherence records, and health notifications."
+        confirmLabel="Disconnect Caregiver"
+        cancelLabel="Keep Connected"
+        isLoading={isRevoking}
+        onConfirm={handleConfirmRevokeLink}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   );
 }

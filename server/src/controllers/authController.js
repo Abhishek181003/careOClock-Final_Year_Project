@@ -394,14 +394,22 @@ export async function getMe(req, res) {
       extraData = { patient, caregiver: caregiverLink?.caregiverUserId || null };
     } else if (user.role === 'caregiver') {
       // Protect patient PII from caregiver: select displayName only for dashboard (FR8, P2-11)
-      const link = await CaregiverLink.findOne({
+      const links = await CaregiverLink.find({
         caregiverUserId: user._id,
         status: 'active',
       }).populate({
         path: 'patientId',
-        populate: { path: 'userId', select: 'displayName' },
+        select: 'age sex phone assignedDoctorId',
+        populate: [
+          { path: 'userId', select: 'displayName' },
+          { path: 'assignedDoctorId', select: 'displayName' },
+        ],
       });
-      extraData = { linkedPatient: link?.patientId || null };
+      const linkedPatients = links.map((l) => l.patientId).filter(Boolean);
+      extraData = {
+        linkedPatient: linkedPatients[0] || null,
+        linkedPatients,
+      };
     } else if (user.role === 'doctor') {
       const assignedPatientsCount = await Patient.countDocuments({ assignedDoctorId: user._id });
       extraData = { doctorStats: { assignedPatientsCount } };

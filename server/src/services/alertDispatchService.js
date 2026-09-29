@@ -82,32 +82,83 @@ export async function dispatchAlert({ prediction, patient, vitals, user = null }
 }
 
 /**
- * Acknowledge an active clinical alert
+ * Acknowledge an active clinical alert with role separation (Option 2)
+ * - Doctor: Globally resolves the clinical alert (status: 'acknowledged').
+ * - Patient / Caregiver: Records family awareness and clears their own notifications,
+ *   while leaving the clinical alert active for the doctor to review.
  */
-export async function acknowledgeAlert({ alertId, doctorId, resolutionNotes = '' }) {
-  const alert = await Alert.findOne({ _id: alertId, doctorId });
+export async function acknowledgeAlert({ alertId, doctorId, userId, role = 'doctor', resolutionNotes = '' }) {
+  const query = { _id: alertId };
+  if (doctorId) {
+    query.doctorId = doctorId;
+  }
+  const alert = await Alert.findOne(query);
   if (!alert) {
     return null;
   }
 
-  alert.status = 'acknowledged';
-  alert.acknowledgedAt = new Date();
-  alert.acknowledgedBy = doctorId;
-  if (resolutionNotes) {
-    alert.resolutionNotes = resolutionNotes;
+  const actingUserId = userId || doctorId;
+
+  if (role === 'doctor') {
+    alert.status = 'acknowledged';
+    alert.acknowledgedAt = new Date();
+    alert.acknowledgedBy = actingUserId;
+    alert.doctorAcknowledgedAt = new Date();
+    alert.doctorAcknowledgedBy = actingUserId;
+    alert.acknowledgedRole = 'doctor';
+    alert.resolutionNotes = resolutionNotes || 'Clinically reviewed and signed off by physician';
+  } else if (role === 'patient') {
+    alert.patientCheckedAt = new Date();
+    alert.patientCheckedBy = actingUserId;
+    if (!alert.dismissedByUsers) alert.dismissedByUsers = [];
+    if (!alert.dismissedByUsers.some((uid) => uid.toString() === actingUserId.toString())) {
+      alert.dismissedByUsers.push(actingUserId);
+    }
+  } else if (role === 'caregiver') {
+    alert.caregiverCheckedAt = new Date();
+    alert.caregiverCheckedBy = actingUserId;
+    if (!alert.dismissedByUsers) alert.dismissedByUsers = [];
+    if (!alert.dismissedByUsers.some((uid) => uid.toString() === actingUserId.toString())) {
+      alert.dismissedByUsers.push(actingUserId);
+    }
   }
 
   await alert.save();
 
   await AuditLog.logEvent({
-    action: 'CLINICAL_ALERT_ACKNOWLEDGED',
-    userId: doctorId,
-    role: 'doctor',
+    action: `CLINICAL_ALERT_${role.toUpperCase()}_ACKNOWLEDGED`,
+    userId: actingUserId,
+    role: role || 'doctor',
     details: {
       alertId: alert._id,
       patientId: alert.patientId,
-      resolutionNotes,
+      resolutionNotes: alert.resolutionNotes,
+      status: alert.status,
     },
+  });
+
+  return alert;
+}
+
+/**
+ * Dismiss an alert notification for a specific user without globally resolving it
+ */
+export async function dismissAlertForUser({ alertId, userId }) {
+  const alert = await Alert.findById(alertId);
+  if (!alert) return null;
+
+  if (!alert.dismissedByUsers) {
+    alert.dismissedByUsers = [];
+  }
+  if (!alert.dismissedByUsers.some((uid) => uid.toString() === userId.toString())) {
+    alert.dismissedByUsers.push(userId);
+    await alert.save();
+  }
+
+  await AuditLog.logEvent({
+    action: 'CLINICAL_ALERT_DISMISSED',
+    userId,
+    details: { alertId: alert._id, patientId: alert.patientId },
   });
 
   return alert;

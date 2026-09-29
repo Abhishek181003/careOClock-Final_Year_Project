@@ -45,9 +45,23 @@ export default function PatientHome() {
   const [nextMedicine, setNextMedicine] = useState(null);
   const [streakDays, setStreakDays] = useState(0);
   const [patientId, setPatientId] = useState('');
+  const [patientProfile, setPatientProfile] = useState(null);
+  const [dismissOnboarding, setDismissOnboarding] = useState(() => {
+    return localStorage.getItem('careoclock_dismiss_patient_onboarding') === 'true';
+  });
 
   const loadPatientData = useCallback(async () => {
     try {
+      // 0. Fetch patient profile to check doctor assignment & baseline completeness
+      try {
+        const meRes = await api.get('/auth/me');
+        if (meRes.data?.patient) {
+          setPatientProfile(meRes.data.patient);
+        }
+      } catch {
+        // Fallback
+      }
+
       // 1. Fetch vitals history to identify morning and evening checkins
       const vitalsRes = await api.get('/clinical/vitals?limit=10');
       const vitals = vitalsRes.data?.vitals || [];
@@ -129,6 +143,13 @@ export default function PatientHome() {
   const { prefix, tod, tip } = getGreeting(firstName);
   const isMorningTime = tod === 'morning';
 
+  // Setup Checklist Calculation
+  const hasDoctor = Boolean(patientProfile?.assignedDoctorId);
+  const hasBaseline = Boolean(patientProfile?.heightCm && patientProfile?.weightKg);
+  const hasVitals = Boolean(latestVitals);
+  const onboardingStepsCompleted = (hasBaseline ? 1 : 0) + (hasDoctor ? 1 : 0) + (hasVitals ? 1 : 0);
+  const showOnboardingChecklist = !dismissOnboarding && onboardingStepsCompleted < 3;
+
   return (
     <div className="dash">
       {/* ── Hero Greeting Banner ──────────────────────────── */}
@@ -154,6 +175,90 @@ export default function PatientHome() {
           </div>
         </div>
       </div>
+
+      {/* ── Engagement / Usability: Welcome Setup Checklist Banner ── */}
+      {showOnboardingChecklist && (
+        <div className="p-4 sm:p-5 rounded-ritual bg-surface border border-line shadow-ritual space-y-3.5 dash-enter">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-brand px-2.5 py-0.5 rounded-full bg-brand-light/50 border border-brand/30">
+                  Onboarding Checklist
+                </span>
+                <span className="text-xs text-ink-soft font-semibold">
+                  {onboardingStepsCompleted} of 3 steps completed
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-display font-bold text-ink mt-1.5">
+                Welcome to CareOClock, {firstName}. Three steps to complete your care setup:
+              </h3>
+            </div>
+            <button
+              onClick={() => {
+                setDismissOnboarding(true);
+                localStorage.setItem('careoclock_dismiss_patient_onboarding', 'true');
+              }}
+              className="p-1 rounded-full text-ink-soft hover:bg-paper"
+              title="Dismiss checklist"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full bg-line/60 h-2 rounded-full overflow-hidden">
+            <div
+              className="bg-brand h-full transition-all duration-500 rounded-full"
+              style={{ width: `${(onboardingStepsCompleted / 3) * 100}%` }}
+            />
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-2.5 pt-1">
+            {/* Step 1 */}
+            <Link
+              to="/app/profile"
+              className={`p-3 rounded-ritual border transition-all flex flex-col justify-between gap-1.5 ${
+                hasBaseline ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-paper border-line hover:border-brand/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-ink">1. Baseline Profile</span>
+                {hasBaseline ? <CheckCircle2 size={16} className="text-emerald-600" /> : <span className="w-2 h-2 rounded-full bg-amber-500" />}
+              </div>
+              <p className="text-[11px] text-ink-soft">Height, weight & conditions</p>
+            </Link>
+
+            {/* Step 2 */}
+            <Link
+              to="/app/profile"
+              className={`p-3 rounded-ritual border transition-all flex flex-col justify-between gap-1.5 ${
+                hasDoctor ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-paper border-line hover:border-brand/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-ink">2. Connect Physician</span>
+                {hasDoctor ? <CheckCircle2 size={16} className="text-emerald-600" /> : <span className="w-2 h-2 rounded-full bg-amber-500" />}
+              </div>
+              <p className="text-[11px] text-ink-soft">Link primary care doctor</p>
+            </Link>
+
+            {/* Step 3 */}
+            <button
+              type="button"
+              onClick={() => setActiveSlot(tod === 'morning' ? 'morning' : 'evening')}
+              className={`p-3 rounded-ritual border transition-all flex flex-col justify-between gap-1.5 text-left ${
+                hasVitals ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-paper border-line hover:border-brand/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-ink">3. First Daily Vitals</span>
+                {hasVitals ? <CheckCircle2 size={16} className="text-emerald-600" /> : <span className="w-2 h-2 rounded-full bg-amber-500" />}
+              </div>
+              <p className="text-[11px] text-ink-soft">Log blood pressure & heart rate</p>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Twice-Daily Check-In Slot Cards ────────────────── */}
       <div className="slot-grid dash-enter dash-enter--d1">

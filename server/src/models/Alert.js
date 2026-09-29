@@ -48,7 +48,7 @@ const alertSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'acknowledged', 'resolved'],
+      enum: ['active', 'acknowledged', 'resolved', 'dismissed'],
       default: 'active',
       index: true,
     },
@@ -63,10 +63,40 @@ const alertSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
+    acknowledgedRole: {
+      type: String,
+    },
+    doctorAcknowledgedAt: {
+      type: Date,
+    },
+    doctorAcknowledgedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    patientCheckedAt: {
+      type: Date,
+    },
+    patientCheckedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    caregiverCheckedAt: {
+      type: Date,
+    },
+    caregiverCheckedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     resolutionNotes: {
       type: String,
       maxlength: 500,
     },
+    dismissedByUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
   },
   {
     timestamps: true,

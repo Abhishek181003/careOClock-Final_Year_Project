@@ -23,6 +23,8 @@ const medicineInputSchema = z.object({
   lowStockThreshold: z.number().int().min(0).default(5),
   unit: z.string().optional().default('tablets'),
   instructions: z.string().max(500).optional().default(''),
+  durationDays: z.number().int().min(0).optional().default(0),
+  clinicalJustification: z.string().max(500).optional().default(''),
 });
 
 const updateMedicineSchema = medicineInputSchema.partial();
@@ -51,16 +53,25 @@ async function resolveAuthorizedPatient(req, requestedPatientId) {
     return patient._id.toString();
   }
 
-  if (!targetPatientId || !mongoose.Types.ObjectId.isValid(targetPatientId)) {
-    return null;
-  }
-
   if (role === 'doctor') {
+    if (!targetPatientId) {
+      const firstPatient = await Patient.findOne({ assignedDoctorId: userId });
+      return firstPatient ? firstPatient._id.toString() : null;
+    }
+    if (!mongoose.Types.ObjectId.isValid(targetPatientId)) return null;
     const patient = await Patient.findOne({ _id: targetPatientId, assignedDoctorId: userId });
     return patient ? patient._id.toString() : null;
   }
 
   if (role === 'caregiver') {
+    if (!targetPatientId) {
+      const firstLink = await CaregiverLink.findOne({
+        caregiverUserId: userId,
+        status: 'active',
+      });
+      return firstLink ? firstLink.patientId.toString() : null;
+    }
+    if (!mongoose.Types.ObjectId.isValid(targetPatientId)) return null;
     const activeLink = await CaregiverLink.findOne({
       patientId: targetPatientId,
       caregiverUserId: userId,

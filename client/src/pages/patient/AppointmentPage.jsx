@@ -17,6 +17,7 @@ import {
   Activity,
   CalendarCheck,
   RefreshCw,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
@@ -76,6 +77,7 @@ export default function AppointmentPage() {
 
   // Modals
   const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [telehealthPermissionTarget, setTelehealthPermissionTarget] = useState(null); // appointment object awaiting permission
   const [activeVideoCall, setActiveVideoCall] = useState(null); // appointment object
   const [rescheduleTarget, setRescheduleTarget] = useState(null); // appointment object
   const [cancelTarget, setCancelTarget] = useState(null); // appointment object
@@ -355,7 +357,7 @@ export default function AppointmentPage() {
             <div className="flex flex-col sm:flex-row md:flex-col items-stretch sm:items-center md:items-end gap-3 w-full md:w-auto">
               {nextAppointment.type === 'video' ? (
                 <button
-                  onClick={() => setActiveVideoCall(nextAppointment)}
+                  onClick={() => setTelehealthPermissionTarget(nextAppointment)}
                   className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-brand text-white font-semibold text-base shadow-ritual hover:bg-brand-dark transition-all transform active:scale-95"
                 >
                   <Video size={18} />
@@ -462,7 +464,7 @@ export default function AppointmentPage() {
                   <AppointmentCard
                     key={apt._id}
                     appointment={apt}
-                    onJoinVideo={() => setActiveVideoCall(apt)}
+                    onJoinVideo={() => setTelehealthPermissionTarget(apt)}
                     onReschedule={() => setRescheduleTarget(apt)}
                     onCancel={() => setCancelTarget(apt)}
                   />
@@ -753,6 +755,61 @@ export default function AppointmentPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Telehealth Permission Pre-Prompt ─────────────────── */}
+      {telehealthPermissionTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-surface rounded-ritual shadow-modal border border-line p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                <Video size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-ink">Camera &amp; Microphone Access</h3>
+                <p className="text-xs text-ink-soft">CareOClock Encrypted Telehealth</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-ink-soft leading-relaxed">
+              To join your scheduled consultation with{' '}
+              <strong className="text-ink">
+                {formatDoctorName(telehealthPermissionTarget.doctorId?.displayName)}
+              </strong>
+              , your browser will ask for permission to access your camera and microphone so your physician can see and speak with you.
+            </p>
+
+            <div className="bg-paper/70 rounded-clinical p-3 border border-line text-xs text-ink-soft space-y-1">
+              <div className="flex items-center gap-2 font-medium text-ink">
+                <ShieldCheck size={14} className="text-brand" />
+                <span>Protected Health Consultation</span>
+              </div>
+              <p>Media streams are encrypted end-to-end and never recorded without prior clinical consent.</p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setTelehealthPermissionTarget(null)}
+                className="px-4 py-2 rounded-full border border-line text-ink-soft hover:text-ink text-sm font-medium transition-colors"
+              >
+                Not Now
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = telehealthPermissionTarget;
+                  setTelehealthPermissionTarget(null);
+                  setActiveVideoCall(target);
+                }}
+                className="px-5 py-2 rounded-full bg-brand text-white font-semibold text-sm hover:bg-brand-dark transition-colors shadow-sm flex items-center gap-2"
+              >
+                <Video size={16} />
+                <span>Allow &amp; Enter Consultation</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -17,6 +17,8 @@ import {
   Plus,
   Watch,
   Layers,
+  X,
+  RefreshCw,
 } from 'lucide-react';
 import {
   PHYSIOLOGICAL_BOUNDS,
@@ -76,6 +78,8 @@ export default function VitalsEntryForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSimulatingSample, setIsSimulatingSample] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [lastFailedPayload, setLastFailedPayload] = useState(null);
+  const [milestoneNotice, setMilestoneNotice] = useState('');
   const [successData, setSuccessData] = useState(null);
   const [sampleNotice, setSampleNotice] = useState('');
 
@@ -252,6 +256,9 @@ export default function VitalsEntryForm({
       setIsSubmitting(true);
       const result = await submitVitals(payload, token);
       setSuccessData(result);
+      setLastFailedPayload(null);
+      setMilestoneNotice('🎉 Daily Health Ritual Recorded! Your vitals have been synchronized with clinical oversight.');
+      setTimeout(() => setMilestoneNotice(''), 5000);
 
       // Reset form fields
       setSystolicBp('');
@@ -267,7 +274,30 @@ export default function VitalsEntryForm({
         onVitalsSaved(result.vitals);
       }
     } catch (err) {
-      setErrorMessage(err.message || 'Error submitting vitals reading.');
+      setLastFailedPayload(payload);
+      setErrorMessage(err.message || 'Error submitting vitals reading. Connection may have dropped.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // One-tap retry for fixable failed submission
+  const handleRetrySubmit = async () => {
+    if (!lastFailedPayload) return;
+    try {
+      setIsSubmitting(true);
+      setErrorMessage('');
+      const result = await submitVitals(lastFailedPayload, token);
+      setSuccessData(result);
+      setLastFailedPayload(null);
+      setMilestoneNotice('🎉 Daily Health Ritual Recorded! Your vitals have been synchronized with clinical oversight.');
+      setTimeout(() => setMilestoneNotice(''), 5000);
+
+      if (onVitalsSaved) {
+        onVitalsSaved(result.vitals);
+      }
+    } catch (err) {
+      setErrorMessage(err.message || 'Retry failed. Please check network connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -393,11 +423,47 @@ export default function VitalsEntryForm({
         </div>
       )}
 
-      {/* Error Alert Banner */}
+      {/* Milestone / Streak Celebratory Alert Toast */}
+      {milestoneNotice && (
+        <div
+          role="status"
+          className="p-3.5 rounded-ritual bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 text-xs font-semibold flex items-center justify-between gap-2 animate-pop"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <span>{milestoneNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMilestoneNotice('')}
+            className="text-emerald-700 hover:text-emerald-950 p-1"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Error Alert Banner with Fixable Retry Button */}
       {errorMessage && (
-        <div className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-rose-900 text-sm flex items-start gap-2.5 animate-shake">
-          <AlertTriangle size={18} className="text-rose-600 flex-shrink-0 mt-0.5" />
-          <div className="font-medium text-xs leading-relaxed">{errorMessage}</div>
+        <div
+          role="alert"
+          className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-rose-900 text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-shake"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={18} className="text-rose-600 flex-shrink-0 mt-0.5" />
+            <div className="font-medium text-xs leading-relaxed">{errorMessage}</div>
+          </div>
+          {lastFailedPayload && (
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleRetrySubmit}
+              className="px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shrink-0 flex items-center gap-1.5 shadow-sm transition-all"
+            >
+              <RefreshCw size={13} className={isSubmitting ? 'animate-spin' : ''} />
+              <span>{isSubmitting ? 'Retrying...' : 'Retry Submission'}</span>
+            </button>
+          )}
         </div>
       )}
 

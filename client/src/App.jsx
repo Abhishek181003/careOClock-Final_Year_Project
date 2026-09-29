@@ -61,7 +61,7 @@ export default function App() {
               </Route>
 
               {/* Health Telemetry & AI Analytics */}
-              <Route element={<RoleRoute allow={['patient', 'caregiver']} />}>
+              <Route element={<RoleRoute allow={['patient', 'caregiver', 'doctor']} />}>
                 <Route path="/app/health" element={<HealthPage />} />
               </Route>
 

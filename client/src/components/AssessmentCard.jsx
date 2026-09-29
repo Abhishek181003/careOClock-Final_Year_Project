@@ -8,6 +8,54 @@ import './dashboards/Dashboards.css';
  *  - patient / caregiver: overall tier + overall score + single deterministic plain-language sentence.
  *  - doctor: the above, plus Layer 1 Home-NEWS breakdown and Layer 2 feature-deviation table.
  */
+const FEATURE_MAP = {
+  heart_rate: { label: 'Heart Rate', unit: 'bpm' },
+  systolic_bp: { label: 'Systolic Blood Pressure', unit: 'mmHg' },
+  diastolic_bp: { label: 'Diastolic Blood Pressure', unit: 'mmHg' },
+  spo2: { label: 'Oxygen Saturation (SpO2)', unit: '%' },
+  temperature_c: { label: 'Body Temperature', unit: '°C' },
+  respiration_rate: { label: 'Respiration Rate', unit: 'br/min' },
+};
+
+function generateDeviationExplanation(deviations) {
+  if (!Array.isArray(deviations) || deviations.length === 0) {
+    return 'Personal baseline learning is active. Standard physiological checks apply while personal baseline statistical ranges are established.';
+  }
+
+  const highAnomalies = deviations.filter((d) => Math.abs(d.zScore ?? d.z_score ?? 0) >= 2.0);
+  const mildAnomalies = deviations.filter((d) => {
+    const z = Math.abs(d.zScore ?? d.z_score ?? 0);
+    return z >= 1.0 && z < 2.0;
+  });
+
+  if (highAnomalies.length > 0) {
+    const descriptions = highAnomalies.map((d) => {
+      const rawKey = (d.featureKey || d.vital || d.feature || '').toLowerCase();
+      const name = FEATURE_MAP[rawKey]?.label || d.feature || d.vital || 'vital';
+      const z = d.zScore ?? d.z_score ?? 0;
+      const zNum = typeof z === 'number' ? z : parseFloat(z || 0);
+      const zStr = zNum > 0 ? `+${zNum.toFixed(1)}` : zNum.toFixed(1);
+      const dir = zNum >= 0 ? 'above' : 'below';
+      return `${name} is ${zNum >= 0 ? 'elevated' : 'depressed'} (${zStr} SD ${dir} personal baseline)`;
+    });
+    return `${descriptions.join(', ')}. A deviation exceeding ±2.0 SD represents a statistically significant acute physiological anomaly departing from this individual's resting norm.`;
+  }
+
+  if (mildAnomalies.length > 0) {
+    const descriptions = mildAnomalies.map((d) => {
+      const rawKey = (d.featureKey || d.vital || d.feature || '').toLowerCase();
+      const name = FEATURE_MAP[rawKey]?.label || d.feature || d.vital || 'vital';
+      const z = d.zScore ?? d.z_score ?? 0;
+      const zNum = typeof z === 'number' ? z : parseFloat(z || 0);
+      const zStr = zNum > 0 ? `+${zNum.toFixed(1)}` : zNum.toFixed(1);
+      return `${name} shows a mild departure (${zStr} SD)`;
+    });
+    return `${descriptions.join(', ')}. All vitals remain within manageable ranges, but mild trend shifts are monitored relative to personal baseline.`;
+  }
+
+  return 'All physiological parameters remain tightly clustered within expected statistical variance (< 1.0 SD) of this patient’s personalized resting baseline.';
+}
+
 export default function AssessmentCard({ assessment, role, variant }) {
   const showDoctorDetail = (variant ?? role) === 'doctor';
 
@@ -102,51 +150,108 @@ export default function AssessmentCard({ assessment, role, variant }) {
         {/* Doctor detail - Layer 2 Personal Baseline Deviations */}
         {showDoctorDetail && assessment.layer2 && Array.isArray(assessment.layer2.deviations) && assessment.layer2.deviations.length > 0 && (
           <div className="mt-5 pt-4 border-t border-line">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-ink mb-2">
-              Layer 2 — Personal Baseline Deviations
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink flex items-center gap-1.5">
+                <Activity size={14} className="text-brand" />
+                <span>Layer 2 — Personal Baseline Deviations</span>
+              </h3>
+              <span className="text-[11px] font-mono text-ink-soft bg-paper px-2 py-0.5 rounded border border-line">
+                Personalized ML Anomaly Detection (7–28 Day Rolling Baseline)
+              </span>
+            </div>
+
+            {/* Written Clinical Explanation Box */}
+            <div className="mb-3 p-3 rounded-ritual bg-teal-500/5 border border-teal-500/20 text-xs text-ink space-y-1">
+              <div className="font-semibold text-brand flex items-center gap-1.5">
+                <Info size={14} />
+                <span>Clinical Statistical Interpretation:</span>
+              </div>
+              <p className="text-ink leading-relaxed">
+                {generateDeviationExplanation(assessment.layer2.deviations)}
+              </p>
+            </div>
+
+            {/* Deviations Table */}
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-xs text-left">
                 <thead className="bg-paper text-ink-soft uppercase border-b border-line">
                   <tr>
-                    <th className="py-2 px-3">Feature</th>
-                    <th className="py-2 px-3">Current</th>
-                    <th className="py-2 px-3">Baseline (&mu; &plusmn; &sigma;)</th>
-                    <th className="py-2 px-3">Deviation (z)</th>
-                    <th className="py-2 px-3">Trend</th>
+                    <th className="py-2.5 px-3">Feature</th>
+                    <th className="py-2.5 px-3">Current</th>
+                    <th className="py-2.5 px-3">Baseline (&mu; &plusmn; &sigma;)</th>
+                    <th className="py-2.5 px-3">Deviation (z)</th>
+                    <th className="py-2.5 px-3">Trend</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line bg-surface">
                   {[...assessment.layer2.deviations]
-                    .sort((a, b) => Math.abs(b.zScore || 0) - Math.abs(a.zScore || 0))
-                    .map((row) => {
-                      const isHighDev = Math.abs(row.zScore || 0) >= 2.0;
+                    .sort((a, b) => {
+                      const zA = typeof a.zScore === 'number' ? Math.abs(a.zScore) : typeof a.z_score === 'number' ? Math.abs(a.z_score) : 0;
+                      const zB = typeof b.zScore === 'number' ? Math.abs(b.zScore) : typeof b.z_score === 'number' ? Math.abs(b.z_score) : 0;
+                      return zB - zA;
+                    })
+                    .map((row, idx) => {
+                      const rawKey = (row.featureKey || row.vital || row.feature || '').toLowerCase();
+                      const meta = FEATURE_MAP[rawKey] || {
+                        label: (row.feature && !row.feature.includes('_')) ? row.feature : rawKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+                        unit: row.unit || '',
+                      };
+
+                      // Current reading formatting
+                      let currentVal = row.current ?? row.currentValue ?? '—';
+                      if (currentVal !== '—' && meta.unit && !String(currentVal).includes(meta.unit)) {
+                        currentVal = `${currentVal} ${meta.unit}`;
+                      }
+
+                      // Baseline formatting
+                      let baselineVal = '—';
+                      if (row.personalBaseline && row.personalBaseline !== '—' && row.personalBaseline !== 'Active baseline') {
+                        baselineVal = row.personalBaseline;
+                      } else if (row.baselineMean != null && row.baselineSD != null && row.baselineMean !== '—' && row.baselineSD !== '—') {
+                        baselineVal = `${row.baselineMean} ± ${row.baselineSD} ${meta.unit}`.trim();
+                      } else if (row.mean != null && row.std != null) {
+                        baselineVal = `${row.mean} ± ${row.std} ${meta.unit}`.trim();
+                      }
+
+                      // z-Score
+                      const zNum = typeof row.zScore === 'number' ? row.zScore : typeof row.z_score === 'number' ? row.z_score : parseFloat(row.zScore || 0);
+                      const isHighDev = Math.abs(zNum) >= 2.0;
+
+                      // Trend
+                      const rawTrend = (row.trend || row.direction || '').toLowerCase();
+                      const isElevated = rawTrend === 'elevated' || rawTrend === 'higher' || rawTrend === 'increasing' || rawTrend === 'up' || zNum >= 1.0;
+                      const isLower = rawTrend === 'lower' || rawTrend === 'depressed' || rawTrend === 'decreasing' || rawTrend === 'down' || zNum <= -1.0;
+
                       return (
-                        <tr key={row.feature} className={`hover:bg-paper/40 ${isHighDev ? 'bg-amber-500/5' : ''}`}>
-                          <td className="py-2 px-3 font-medium text-ink">{row.feature}</td>
-                          <td className="py-2 px-3 font-mono font-semibold text-ink">{row.current}</td>
-                          <td className="py-2 px-3 text-ink-soft font-mono">
-                            {row.baselineMean} &plusmn; {row.baselineSD}
+                        <tr key={row.featureKey || row.feature || idx} className={`hover:bg-paper/40 ${isHighDev ? 'bg-amber-500/5' : ''}`}>
+                          <td className="py-2.5 px-3 font-medium text-ink flex items-center gap-1.5">
+                            <span>{meta.label}</span>
                           </td>
-                          <td className="py-2 px-3 font-mono">
-                            <span className={`px-1.5 py-0.5 rounded font-bold ${
-                              isHighDev ? 'bg-rose-100 text-rose-800' : 'bg-paper text-ink'
+                          <td className="py-2.5 px-3 font-mono font-semibold text-ink">
+                            {currentVal}
+                          </td>
+                          <td className="py-2.5 px-3 text-ink-soft font-mono">
+                            {baselineVal}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono">
+                            <span className={`px-2 py-0.5 rounded font-bold ${
+                              isHighDev ? 'bg-rose-100 text-rose-800' : Math.abs(zNum) >= 1.0 ? 'bg-amber-100 text-amber-800' : 'bg-paper text-ink'
                             }`}>
-                              {row.zScore ? (row.zScore > 0 ? `+${row.zScore.toFixed(1)}` : row.zScore.toFixed(1)) : '0.0'} SD
+                              {zNum ? (zNum > 0 ? `+${zNum.toFixed(1)}` : zNum.toFixed(1)) : '0.0'} SD
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-ink-soft">
-                            {row.trend === 'increasing' || row.trend === 'up' ? (
-                              <span className="inline-flex items-center text-rose-600 gap-0.5 font-medium">
+                          <td className="py-2.5 px-3 text-ink-soft">
+                            {isElevated ? (
+                              <span className="inline-flex items-center text-rose-600 gap-1 font-medium">
                                 <ArrowUpRight size={13} /> Elevated
                               </span>
-                            ) : row.trend === 'decreasing' || row.trend === 'down' ? (
-                              <span className="inline-flex items-center text-blue-600 gap-0.5 font-medium">
+                            ) : isLower ? (
+                              <span className="inline-flex items-center text-blue-600 gap-1 font-medium">
                                 <ArrowDownRight size={13} /> Lower
                               </span>
                             ) : (
-                              <span className="inline-flex items-center text-emerald-600 gap-0.5 font-medium">
-                                <Minus size={13} /> Stable
+                              <span className="inline-flex items-center text-emerald-600 gap-1 font-medium">
+                                <Minus size={13} /> Within Baseline
                               </span>
                             )}
                           </td>
@@ -155,6 +260,15 @@ export default function AssessmentCard({ assessment, role, variant }) {
                     })}
                 </tbody>
               </table>
+            </div>
+
+            {/* How to Read This Table Guide */}
+            <div className="mt-2.5 p-2.5 rounded-lg bg-paper border border-line text-[11px] text-ink-soft flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-4 flex-wrap">
+                <span><strong>&mu; &plusmn; &sigma;</strong>: Personal resting mean (&mu;) and standard deviation (&sigma;) over 7–28 days.</span>
+                <span><strong>|z| &lt; 1.0 SD</strong>: Normal baseline variance</span>
+                <span><strong>|z| &ge; 2.0 SD</strong>: Notable physiological deviation</span>
+              </div>
             </div>
           </div>
         )}

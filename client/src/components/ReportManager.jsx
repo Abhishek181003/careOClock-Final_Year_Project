@@ -18,6 +18,7 @@ import {
   Activity,
   FileCheck2,
 } from 'lucide-react';
+import ConfirmModal from './common/ConfirmModal';
 import './ReportManager.css';
 
 const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
@@ -60,6 +61,8 @@ export default function ReportManager({ token: propToken, patientId, userRole = 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -285,15 +288,18 @@ export default function ReportManager({ token: propToken, patientId, userRole = 
     }
   };
 
-  // Soft Delete Handler
-  const handleDelete = async (report) => {
-    if (!window.confirm(`Are you sure you want to remove "${report.title}" from your medical records?`)) {
-      return;
-    }
+  // Soft Delete Handlers with accessible ConfirmModal
+  const handleDelete = (report) => {
+    setDeleteTarget(report);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
 
     try {
       setError('');
-      const res = await fetch(`/api/reports/${report.id}`, {
+      const res = await fetch(`/api/reports/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -301,14 +307,17 @@ export default function ReportManager({ token: propToken, patientId, userRole = 
       const data = await res.json();
 
       if (res.ok) {
-        setSuccessNotice('Document removed successfully.');
-        setReports((prev) => prev.filter((r) => r.id !== report.id));
-        setTimeout(() => setSuccessNotice(''), 3000);
+        setSuccessNotice(`Document "${deleteTarget.title}" removed successfully.`);
+        setReports((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+        setDeleteTarget(null);
+        setTimeout(() => setSuccessNotice(''), 3500);
       } else {
         setError(data.error || 'Failed to remove document.');
       }
     } catch (err) {
       setError(`Delete error: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -411,14 +420,28 @@ export default function ReportManager({ token: propToken, patientId, userRole = 
 
       {/* ── Notification & Alert Banners ──────────────────────────────── */}
       {error && (
-        <div className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between gap-3 animate-pop-report">
+        <div className="p-3.5 rounded-ritual bg-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-pop-report">
           <div className="flex items-center gap-2">
             <AlertCircle size={16} className="text-rose-600 flex-shrink-0" />
             <span>{error}</span>
           </div>
-          <button onClick={() => setError('')} className="text-rose-600 hover:text-rose-900">
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={loadReports}
+              className="px-3 py-1 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+            >
+              <RefreshCw size={12} className={isLoading ? 'spin' : ''} />
+              <span>Retry</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setError('')}
+              className="text-rose-600 hover:text-rose-900 p-1"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -893,6 +916,18 @@ export default function ReportManager({ token: propToken, patientId, userRole = 
           </div>
         </div>
       )}
+
+      {/* ── Critical Alert: Irreversible Action Confirmation Modal ──── */}
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        title="Remove Medical Document?"
+        message={`Are you sure you want to permanently remove "${deleteTarget?.title}" from your active clinical records? This file will no longer be visible to your physician or caregiver.`}
+        confirmLabel="Confirm Removal"
+        cancelLabel="Keep Record"
+        isLoading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

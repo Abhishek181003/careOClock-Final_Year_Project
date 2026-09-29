@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Activity,
   Heart,
@@ -85,6 +86,11 @@ const METRIC_CONFIG = {
 
 export default function HealthPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryPatientId = searchParams.get('patientId') || '';
+  const [caregiverPatients, setCaregiverPatients] = useState([]);
+  const [selectedCaregiverPatientId, setSelectedCaregiverPatientId] = useState(queryPatientId);
+
   const [vitals, setVitals] = useState([]);
   const [patientId, setPatientId] = useState('');
   const [latestAssessment, setLatestAssessment] = useState(null);
@@ -97,14 +103,38 @@ export default function HealthPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredPoint, setHoveredPoint] = useState(null);
 
+  // Load caregiver patient list if viewer is caregiver
+  useEffect(() => {
+    if (user?.role === 'caregiver') {
+      api
+        .get('/caregiver/links')
+        .then((res) => {
+          const activeLinks = (res.data?.links || []).filter((l) => l.status === 'active' && l.patientId);
+          const patients = activeLinks.map((l) => l.patientId);
+          setCaregiverPatients(patients);
+          if (patients.length > 0) {
+            const initialId =
+              queryPatientId && patients.some((p) => p._id === queryPatientId)
+                ? queryPatientId
+                : patients[0]._id;
+            setSelectedCaregiverPatientId(initialId);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user?.role, queryPatientId]);
+
   // Load real vitals telemetry and real AI assessment directly from MongoDB
   const loadHealthData = useCallback(async () => {
     setIsLoading(true);
     try {
+      const effectivePatientId = user?.role === 'caregiver' ? selectedCaregiverPatientId : '';
+      const vitalsQuery = effectivePatientId ? `?patientId=${effectivePatientId}&limit=50` : '?limit=50';
+
       // 1. Fetch real vitals history
-      const vitalsRes = await api.get('/clinical/vitals?limit=50');
+      const vitalsRes = await api.get(`/clinical/vitals${vitalsQuery}`);
       const rawVitals = vitalsRes.data?.vitals || [];
-      const pid = vitalsRes.data?.patientId || '';
+      const pid = effectivePatientId || vitalsRes.data?.patientId || '';
       if (pid) setPatientId(pid);
 
       setVitals(rawVitals);
@@ -132,7 +162,7 @@ export default function HealthPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user?.role, selectedCaregiverPatientId]);
 
   useEffect(() => {
     loadHealthData();
@@ -287,15 +317,59 @@ export default function HealthPage() {
             <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
           </button>
 
-          <button
-            onClick={() => setIsEntryModalOpen(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand text-white font-semibold text-base shadow-sm hover:bg-brand-dark transition-all transform active:scale-95"
-          >
-            <Plus size={20} />
-            <span>Record Health Data</span>
-          </button>
+          {user?.role === 'caregiver' ? (
+            <div className="px-4 py-2 rounded-full bg-paper border border-line text-xs font-semibold text-ink-soft flex items-center gap-1.5 shadow-sm">
+              <ShieldCheck size={16} className="text-brand" />
+              <span>Caregiver Read-Only Mode</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsEntryModalOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand text-white font-semibold text-base shadow-sm hover:bg-brand-dark transition-all transform active:scale-95"
+            >
+              <Plus size={20} />
+              <span>Record Health Data</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* ── Caregiver Multi-Patient Switcher Bar ──────────────────────── */}
+      {user?.role === 'caregiver' && caregiverPatients.length > 0 && (
+        <div className="bg-surface rounded-ritual border border-line p-2.5 shadow-sm flex items-center gap-2 overflow-x-auto">
+          <span className="text-xs font-bold uppercase tracking-wider text-ink-soft px-3 shrink-0">
+            Viewing Loved One:
+          </span>
+          {caregiverPatients.map((p) => {
+            const isSel = p._id === selectedCaregiverPatientId;
+            const pName = p.userId?.displayName || p.displayName || 'Loved One';
+            return (
+              <button
+                key={p._id}
+                onClick={() => {
+                  setSelectedCaregiverPatientId(p._id);
+                  setSearchParams({ patientId: p._id });
+                }}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold transition-all shrink-0 ${
+                  isSel
+                    ? 'bg-brand text-white shadow-ritual scale-[1.02]'
+                    : 'bg-paper text-ink-soft hover:text-ink hover:bg-line/40'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    isSel ? 'bg-white/20 text-white' : 'bg-brand/10 text-brand'
+                  }`}
+                >
+                  {pName[0]}
+                </div>
+                <span>{pName}</span>
+                {p.age && <span className={isSel ? 'text-white/80' : 'text-ink-soft'}>({p.age}y)</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Top Prominent AI Engine Result Hero ──────────────────────── */}
       <div className="rounded-ritual bg-surface border border-line p-6 shadow-ritual relative overflow-hidden">
@@ -956,7 +1030,7 @@ export default function HealthPage() {
       </div>
 
       {/* ── Modal: Record Health Data Form ───────────────────────────── */}
-      {isEntryModalOpen && (
+      {user?.role !== 'caregiver' && isEntryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-surface rounded-ritual shadow-ritual border border-line p-6 relative">
             <div className="flex items-center justify-between pb-3 border-b border-line mb-4">

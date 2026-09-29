@@ -75,3 +75,5 @@ ai-engine/benchmarks/results/backup_before_repeat/
 ai-engine/benchmarks/results/*_run*.json
 ai-engine/benchmarks/results/*_run*.csv
 
+storage/
+
